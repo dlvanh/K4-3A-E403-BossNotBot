@@ -11,6 +11,7 @@ codebase/data/raw/
 
 # Runtime
 codebase/data/runtime/
+codebase/bot_config.json
 
 # Python
 __pycache__/
