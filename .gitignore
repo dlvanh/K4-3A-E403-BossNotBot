@@ -1,0 +1,19 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Data pack gốc của BTC — không commit (quy định bảo mật dữ liệu)
+codebase/data/raw/
+*.csv
+!eval/**/*.csv
+!codebase/data/seed/**/*.csv
+
+# Runtime
+codebase/data/runtime/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.idea/
