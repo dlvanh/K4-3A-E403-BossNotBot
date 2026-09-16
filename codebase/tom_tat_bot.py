@@ -82,17 +82,22 @@ class TomTatBot:
         """Lấy tin nhắn gần đây từ một channel"""
         try:
             messages = []
+            raw_count = 0
             time_threshold = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=hours)
-            
+
             async for msg in channel.history(limit=MESSAGE_LIMIT, after=time_threshold, oldest_first=False):
-                if not msg.author.bot and msg.content.strip():
+                raw_count += 1
+                # Discord đánh dấu author.bot=True cho cả tin gửi qua Webhook (không phải bot thật),
+                # nên chỉ loại các bot thật (không có webhook_id), giữ lại tin webhook (vd script seed_*.py)
+                if (not msg.author.bot or msg.webhook_id is not None) and msg.content.strip():
                     messages.append({
                         'author': msg.author.name,
                         'content': msg.content,
                         'time': msg.created_at.strftime('%H:%M'),
                         'jump_url': msg.jump_url,
                     })
-            
+
+            print(f"[debug] #{channel.name}: quét {raw_count} tin thô trong {hours}h, giữ lại {len(messages)} tin sau lọc")
             return list(reversed(messages))
         except Exception as e:
             print(f"Lỗi khi lấy tin nhắn: {e}")
@@ -106,7 +111,7 @@ class TomTatBot:
 
         target_channels = self.get_registered_announcement_channels(guild)
         if not target_channels:
-            # Chưa ai đăng ký kênh nào bằng /tom-tat-them-kenh-thong-bao: suy đoán theo tên
+            # Chưa ai đăng ký kênh nào bằng /them-kenh-thong-bao: suy đoán theo tên
             keywords = ('thông-báo', 'thong-bao', 'announce')
             target_channels = [
                 ch for ch in guild.text_channels
@@ -114,9 +119,14 @@ class TomTatBot:
             ]
 
         try:
+            print(f"[debug] kênh thông báo đang quét: {[ch.name for ch in target_channels] or '(không có kênh nào khớp!)'}")
             for channel in target_channels:
+                raw_count = 0
+                kept = 0
                 async for msg in channel.history(limit=20, after=time_threshold, oldest_first=False):
-                    if not msg.author.bot and msg.content.strip():
+                    raw_count += 1
+                    if (not msg.author.bot or msg.webhook_id is not None) and msg.content.strip():
+                        kept += 1
                         announcements.append({
                             'channel': channel.name,
                             'author': msg.author.name,
@@ -124,6 +134,7 @@ class TomTatBot:
                             'time': msg.created_at.strftime('%H:%M'),
                             'jump_url': msg.jump_url,
                         })
+                print(f"[debug] #{channel.name}: quét {raw_count} tin thô trong {hours}h, giữ lại {kept} tin sau lọc")
         except Exception as e:
             print(f"Lỗi khi lấy thông báo: {e}")
 
@@ -132,9 +143,9 @@ class TomTatBot:
     async def summarize_with_ai(self, messages_text, mode="notice"):
         """Sử dụng OpenAI để tóm tắt tin nhắn"""
         prompts = {
-            "notice": """Dựa vào các thông báo sau, hãy tóm tắt lại những điều quan trọng nhất (tối đa 5 điểm):
-- Sắp xếp theo độ ưu tiên (việc gấp nhất trước)
-- Rút gọn vào 1-2 dòng cho mỗi điểm
+            "notice": """Dựa vào các thông báo sau, hãy tóm tắt lại TẤT CẢ, không được bỏ sót bất kỳ thông báo nào (không giới hạn số điểm, có bao nhiêu thông báo thì liệt kê hết bấy nhiêu):
+- Mỗi thông báo là một điểm riêng, sắp xếp theo độ ưu tiên (việc gấp nhất trước)
+- Rút gọn vào 1-2 dòng cho mỗi điểm, nhưng không được gộp nhiều thông báo khác nội dung vào chung một điểm
 - Bao gồm deadline nếu có
 
 Thông báo:
@@ -147,7 +158,7 @@ Thông báo:
 Trò chuyện:
 """,
             "all": """Tóm tắt toàn bộ hoạt động của server (thông báo + trò chuyện):
-- Phần 1: Thông báo quan trọng (deadline, thay đổi)
+- Phần 1: TẤT CẢ thông báo (deadline, thay đổi) — không giới hạn số lượng, liệt kê đủ, không bỏ sót cái nào
 - Phần 2: Các chủ đề chính đang bàn luận
 - Phần 3: Những vấn đề chưa được giải quyết
 
@@ -160,7 +171,7 @@ Dữ liệu:
         try:
             response = await client.chat.completions.create(
                 model=OPENAI_MODEL,
-                max_tokens=1024,
+                max_tokens=2048,  # tăng lên để liệt kê đủ thông báo khi có nhiều, tránh bị cắt giữa chừng
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -196,8 +207,10 @@ Dữ liệu:
     def format_summary(self, summary_text, title, source_fields=None):
         """Định dạng tóm tắt thành embed, kèm (tuỳ chọn) các field liệt kê tin nhắn nguồn.
         source_fields: list[(tên_field, nội_dung)]"""
-        # Discord giới hạn 4096 ký tự/description và 6000 ký tự/embed, chừa chỗ cho các field nguồn
-        max_desc = 3500 if source_fields else 4096
+        # Discord giới hạn cứng 4096 ký tự/description — đây chỉ là lưới an toàn cuối cùng
+        # cho trường hợp hiếm (1 dòng dài hơn cả chunk_size của build_summary_embeds), không
+        # phải cách xử lý chính, để tránh crash khi gửi embed
+        max_desc = 4096
         if len(summary_text) > max_desc:
             summary_text = summary_text[:max_desc - 3] + "..."
         embed = discord.Embed(
@@ -212,6 +225,32 @@ Dữ liệu:
         embed.set_footer(text="Bot Tom Tat")
         return embed
 
+    def build_summary_embeds(self, summary_text, title, source_fields=None, chunk_size=3500):
+        """Chia summary_text thành nhiều embed nếu quá dài, KHÔNG cắt bớt nội dung —
+        cắt tại ranh giới xuống dòng gần nhất để không cắt ngang một điểm thông báo.
+        Trả về list[discord.Embed], luôn có ít nhất 1 phần tử."""
+        chunks = []
+        remaining = summary_text
+        while remaining:
+            if len(remaining) <= chunk_size:
+                chunks.append(remaining)
+                break
+            split_at = remaining.rfind('\n', 0, chunk_size)
+            if split_at <= 0:
+                split_at = chunk_size
+            chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:].lstrip('\n')
+        if not chunks:
+            chunks = [summary_text]
+
+        embeds = []
+        for i, chunk in enumerate(chunks):
+            part_title = title if len(chunks) == 1 else f"{title} ({i + 1}/{len(chunks)})"
+            # chỉ gắn field tin nhắn nguồn vào embed cuối cùng, tránh lặp lại nhiều lần
+            fields = source_fields if i == len(chunks) - 1 else None
+            embeds.append(self.format_summary(chunk, part_title, source_fields=fields))
+        return embeds
+
 # Tạo instance của bot
 tom_tat = TomTatBot()
 
@@ -220,20 +259,20 @@ async def on_ready():
     print(f'{bot.user} đã kết nối!')
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name="/tom-tat-*"))
 
-@bot.command(name='tom-tat-them-kenh-thong-bao', description='Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo')
-async def tom_tat_them_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
-    """Đăng ký 1 kênh làm nguồn cho /tom-tat-thong-bao, nhớ đến khi bị xoá bằng /tom-tat-xoa-kenh-thong-bao"""
+@bot.command(name='them-kenh-thong-bao', description='Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo')
+async def them_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
+    """Đăng ký 1 kênh làm nguồn cho /tom-tat-thong-bao, nhớ đến khi bị xoá bằng /xoa-kenh-thong-bao"""
     if kênh is None:
         kênh = ctx.channel
 
     added = tom_tat.add_announcement_channel(ctx.guild.id, kênh.id)
     if added:
-        await ctx.send(f"✅ Đã đăng ký {kênh.mention} làm kênh thông báo. Từ giờ `/tom-tat-thong-bao` sẽ luôn đọc kênh này, kể cả sau khi khởi động lại bot — đến khi bạn bỏ đăng ký bằng `/tom-tat-xoa-kenh-thong-bao`.")
+        await ctx.send(f"✅ Đã đăng ký {kênh.mention} làm kênh thông báo. Từ giờ `/tom-tat-thong-bao` sẽ luôn đọc kênh này, kể cả sau khi khởi động lại bot — đến khi bạn bỏ đăng ký bằng `/xoa-kenh-thong-bao`.")
     else:
         await ctx.send(f"{kênh.mention} đã được đăng ký từ trước rồi.")
 
-@bot.command(name='tom-tat-xoa-kenh-thong-bao', description='Bỏ đăng ký kênh này (hoặc kênh chỉ định) khỏi nguồn thông báo')
-async def tom_tat_xoa_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
+@bot.command(name='xoa-kenh-thong-bao', description='Bỏ đăng ký kênh này (hoặc kênh chỉ định) khỏi nguồn thông báo')
+async def xoa_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
     """Bỏ đăng ký 1 kênh khỏi nguồn thông báo"""
     if kênh is None:
         kênh = ctx.channel
@@ -244,14 +283,14 @@ async def tom_tat_xoa_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
     else:
         await ctx.send(f"{kênh.mention} chưa được đăng ký trước đó.")
 
-@bot.command(name='tom-tat-ds-kenh-thong-bao', description='Xem danh sách kênh thông báo đã đăng ký')
-async def tom_tat_ds_kenh_thong_bao(ctx):
+@bot.command(name='ds-kenh-thong-bao', description='Xem danh sách kênh thông báo đã đăng ký')
+async def ds_kenh_thong_bao(ctx):
     """Liệt kê các kênh đã đăng ký làm nguồn thông báo cho server này"""
     channels = tom_tat.get_registered_announcement_channels(ctx.guild)
     if not channels:
         await ctx.send(
             "Chưa có kênh thông báo nào được đăng ký cho server này.\n"
-            "Dùng `/tom-tat-them-kenh-thong-bao` ngay trong kênh cần thêm (hoặc chỉ định `#kênh`).\n"
+            "Dùng `/them-kenh-thong-bao` ngay trong kênh cần thêm (hoặc chỉ định `#kênh`).\n"
             "Hiện tại `/tom-tat-thong-bao` đang tạm suy đoán theo tên kênh chứa \"thông-báo\"/\"announce\"."
         )
         return
@@ -299,14 +338,15 @@ async def tom_tat_thong_bao(ctx):
         # Xóa tin nhắn đang xử lý
         await processing_msg.delete()
         
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu)
+        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
         sources = tom_tat.format_sources_field(announcements)
-        summary_embed = tom_tat.format_summary(
+        summary_embeds = tom_tat.build_summary_embeds(
             summary,
             f"📋 Thông báo hôm nay - {datetime.now().strftime('%a, %d/%m')}",
             source_fields=[("📨 Tin nhắn nguồn", sources)]
         )
-        await ctx.send(embed=summary_embed)
+        for summary_embed in summary_embeds:
+            await ctx.send(embed=summary_embed)
         
     except Exception as e:
         await ctx.send(f"❌ Lỗi: {str(e)}")
@@ -360,14 +400,15 @@ async def tom_tat_tro_chuyen(ctx, kênh: discord.TextChannel = None):
         # Xóa tin nhắn đang xử lý
         await processing_msg.delete()
         
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu)
+        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
         sources = tom_tat.format_sources_field(messages)
-        summary_embed = tom_tat.format_summary(
+        summary_embeds = tom_tat.build_summary_embeds(
             summary,
             f"💬 Trò chuyện #{kênh.name} - 4 giờ gần nhất",
             source_fields=[("📨 Tin nhắn nguồn", sources)]
         )
-        await ctx.send(embed=summary_embed)
+        for summary_embed in summary_embeds:
+            await ctx.send(embed=summary_embed)
         
     except Exception as e:
         await ctx.send(f"❌ Lỗi: {str(e)}")
@@ -428,8 +469,8 @@ async def tom_tat_chung(ctx):
         # Xóa tin nhắn đang xử lý
         await processing_msg.delete()
         
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu)
-        summary_embed = tom_tat.format_summary(
+        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
+        summary_embeds = tom_tat.build_summary_embeds(
             summary,
             f"📰 Bản tin chung - {datetime.now().strftime('%a, %d/%m')}",
             source_fields=[
@@ -437,7 +478,8 @@ async def tom_tat_chung(ctx):
                 ("💬 Nguồn trò chuyện", tom_tat.format_sources_field(messages, max_items=6, max_chars=500)),
             ]
         )
-        await ctx.send(embed=summary_embed)
+        for summary_embed in summary_embeds:
+            await ctx.send(embed=summary_embed)
         
     except Exception as e:
         await ctx.send(f"❌ Lỗi: {str(e)}")
