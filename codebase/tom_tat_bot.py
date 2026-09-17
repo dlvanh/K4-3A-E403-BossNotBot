@@ -380,7 +380,7 @@ async def tom_tat_thong_bao(ctx):
     except Exception as e:
         await ctx.send(f"❌ Lỗi: {str(e)}")
 
-@bot.command(name='tom-tat-tro-chuyen', description='Tóm tắt trò chuyện của một kênh')
+@bot.command(name='tom-tat-tro-chuyen', description='Tóm tắt trò chuyện của một kênh trong 4h qua')
 async def tom_tat_tro_chuyen(ctx, kênh: discord.TextChannel = None):
     """Tóm tắt trò chuyện trong kênh"""
     if kênh is None:
