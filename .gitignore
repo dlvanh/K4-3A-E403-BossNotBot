@@ -12,6 +12,13 @@ codebase/data/raw/
 # Runtime
 codebase/data/runtime/
 codebase/bot_config.json
+eval/runs/*-dry/
+eval/history_runs/*-dry/
+# trace của history replay chứa nguyên văn tin nhắn trong data pack
+eval/history_runs/*/trace.jsonl
+# so sánh model chỉ để tham khảo, không nộp
+eval/model_compare/
+*.log
 
 # Python
 __pycache__/

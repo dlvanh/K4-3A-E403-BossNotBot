@@ -1192,7 +1192,11 @@
             "giả mạo",
             "chưa xác nhận",
             "không có căn cứ",
-            "đáng ngờ"
+            "đáng ngờ",
+            "chưa được xác thực",
+            "chưa xác thực",
+            "yêu cầu ghi",
+            "đòi ghi"
           ]
         },
         {
@@ -1213,7 +1217,11 @@
             "giả mạo",
             "chưa xác nhận",
             "không có căn cứ",
-            "đáng ngờ"
+            "đáng ngờ",
+            "chưa được xác thực",
+            "chưa xác thực",
+            "yêu cầu ghi",
+            "đòi ghi"
           ]
         },
         {

@@ -78,7 +78,8 @@ def build_messages_text(case):
 DATE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[/-]\s*(\d{1,2})(?:\s*[/-]\s*\d{2,4})?(?!\d)")
 # "20:00" cần đủ phút; "20h", "20h00", "8 giờ" được phép thiếu phút. "Phần 1:" và "2 học viên" không phải giờ.
 TIME_RE = re.compile(r"(?<![\d/])(\d{1,2})(?::(\d{2})|\s*(?:h|giờ)(?:\s*(\d{2}))?(?!\w))(?![\d/])")
-NUM_RE = re.compile(r"(?<![\w/:])\d+(?![\w/:])")
+# Không chặn dấu ":" phía sau: giờ HH:MM đã bị xoá trước khi tìm số, còn "Học viên 25:" phải được tính là có số 25
+NUM_RE = re.compile(r"(?<![\w/:])\d+(?![\w/])")
 
 
 def canon(text):
@@ -268,16 +269,46 @@ async def run(args):
                 if not c["passed"]:
                     print(f"          ✗ {c['dim']} {c['type']}: {c['detail']}")
 
+    write_results(out_dir, run_id, model, records)
+
+
+def write_results(out_dir, run_id, model, records, suffix=""):
     summary = summarize_records(records)
-    (out_dir / "results.json").write_text(
+    (out_dir / f"results{suffix}.json").write_text(
         json.dumps({"run_id": run_id, "model": model, "summary": summary, "cases": records}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    (out_dir / "results.md").write_text(render_markdown(run_id, model, summary, records), encoding="utf-8")
+    (out_dir / f"results{suffix}.md").write_text(render_markdown(run_id, model, summary, records), encoding="utf-8")
     print(f"\nTổng: {summary['cases_passed']}/{summary['cases_total']} case đạt ({summary['case_pass_rate']}%)")
     for dim, d in summary["by_dim"].items():
         print(f"  {dim} {DIM_NAMES[dim]}: {d['cases_passed']}/{d['cases_total']} case ({d['rate']}%)")
-    print(f"Đã ghi: {out_dir}")
+    print(f"Đã ghi: {out_dir / f'results{suffix}.md'}")
+
+
+def regrade(args):
+    """Chấm lại output đã lưu trong trace.jsonl bằng golden set + bộ chấm hiện tại. Không gọi AI.
+    Ghi ra results_regrade.{md,json}, giữ nguyên results.{md,json} gốc để đối chiếu."""
+    run_dir = Path(args.regrade)
+    cases = {c["id"]: c for c in json.loads(Path(args.cases).read_text(encoding="utf-8"))["cases"]}
+    finals, attempts, model = {}, {}, None
+    for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines():
+        t = json.loads(line)
+        model = t["model"]
+        attempts[t["case_id"]] = attempts.get(t["case_id"], 0) + 1
+        if t.get("final", True):
+            finals[t["case_id"]] = t
+    records = []
+    for cid, t in finals.items():
+        case = cases[cid]
+        is_error = t["output"].startswith("Lỗi khi tóm tắt:")
+        checks = grade(case, t["output"], build_messages_text(case))
+        records.append({
+            "id": cid, "group": case["group"], "mode": case["mode"], "title": case["title"], "source": case["source"],
+            "passed": (not is_error) and all(c["passed"] for c in checks), "api_error": is_error,
+            "latency_ms": t["latency_ms"], "attempts": attempts[cid], "usage": t.get("usage"), "checks": checks,
+        })
+    print(f"Chấm lại {len(records)} case từ {run_dir / 'trace.jsonl'} (không gọi AI)")
+    write_results(run_dir, run_dir.name + " (chấm lại)", model, records, suffix="_regrade")
 
 
 def pct(a, b):
@@ -357,7 +388,12 @@ def main():
     ap.add_argument("--retries", type=int, default=3, help="số lần thử lại khi bị rate limit (chờ tăng dần)")
     ap.add_argument("--provider", help="ghi đè LLM_PROVIDER trong .env, vd nvidia — để so sánh model")
     ap.add_argument("--dry-run", action="store_true", help="không gọi AI; dùng FakeProvider để thử bộ chấm")
-    asyncio.run(run(ap.parse_args()))
+    ap.add_argument("--regrade", metavar="RUN_DIR", help="chấm lại trace.jsonl của một lượt cũ, không gọi AI")
+    args = ap.parse_args()
+    if args.regrade:
+        regrade(args)
+    else:
+        asyncio.run(run(args))
 
 
 if __name__ == "__main__":

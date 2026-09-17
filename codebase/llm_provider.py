@@ -29,20 +29,27 @@ class LLMProvider(Protocol):
 
 
 class OpenAICompatibleProvider:
-    def __init__(self, name: str, model: str, api_key: str, base_url: str | None = None):
+    def __init__(self, name: str, model: str, api_key: str, base_url: str | None = None,
+                 token_param: str = "max_tokens", reasoning_effort: str | None = None):
         self.name = name
         self.model = model
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # OpenAI dòng GPT-5 trở đi và o-series từ chối "max_tokens", bắt buộc "max_completion_tokens"
+        self._token_param = token_param
+        # Model reasoning tính cả token suy luận vào giới hạn output; "low"/"minimal" để rẻ và không bị cắt
+        self._reasoning_effort = reasoning_effort
         # Metadata của lần gọi gần nhất — để eval/log ghi lại, không ảnh hưởng luồng bot
         self.last_usage: dict | None = None
         self.last_finish_reason: str | None = None
 
     async def complete(self, prompt: str, max_tokens: int = 2048) -> str:
         self.last_usage = self.last_finish_reason = None
+        extra = {"reasoning_effort": self._reasoning_effort} if self._reasoning_effort else {}
         response = await self._client.chat.completions.create(
             model=self.model,
-            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
+            **{self._token_param: max_tokens},
+            **extra,
         )
         choice = response.choices[0]
         self.last_finish_reason = choice.finish_reason  # "length" = bị cắt vì hết max_tokens
@@ -78,10 +85,11 @@ class Preset:
     base_url: str | None
     model: str
     key_env: str | None  # None = không cần key (vd Ollama chạy local)
+    token_param: str = "max_tokens"
 
 
 PRESETS = {
-    "openai": Preset(None, "gpt-4o-mini", "OPENAI_API_KEY"),
+    "openai": Preset(None, "gpt-4o-mini", "OPENAI_API_KEY", "max_completion_tokens"),
     "nvidia": Preset("https://integrate.api.nvidia.com/v1", "openai/gpt-oss-120b", "NVIDIA_API_KEY"),
     "gemini": Preset("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.8-flash", "GEMINI_API_KEY"),
     "anthropic": Preset("https://api.anthropic.com/v1/", "claude-haiku-4-5", "ANTHROPIC_API_KEY"),
@@ -110,4 +118,6 @@ def create_provider(name: str | None = None) -> LLMProvider:
         model=os.getenv("LLM_MODEL") or preset.model,
         api_key=api_key,
         base_url=os.getenv("LLM_BASE_URL") or preset.base_url,
+        token_param=preset.token_param,
+        reasoning_effort=os.getenv("LLM_REASONING_EFFORT") or None,
     )

@@ -1,4 +1,4 @@
-# Timeline replay · `20260917-111651`
+# Timeline replay · `20260917-142752`
 
 Giả lập gọi lệnh tóm tắt mỗi 60 phút trong 12/09 07:00 → 14/09 23:54 (65 thời điểm). Logic chọn tin mô phỏng `tom_tat_bot.py`: thông báo 24h / 20 tin mỗi kênh, trò chuyện 4h / 50 tin thô. Không gọi AI. Bot chỉ thấy tin ≤ thời điểm hỏi.
 
