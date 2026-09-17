@@ -1,231 +1,399 @@
 """
-run_eval.py — Chạy trọn golden set (golden_set.py) qua ĐÚNG hàm summarize_with_ai() thật của bot
-(import từ tom_tat_bot.py, dùng đúng prompt + client OpenAI thật — chỉ bỏ qua phần Discord Gateway,
-giống cách replay_test.py làm), rồi tự chấm 3 chiều chất lượng:
+run_eval.py — Chạy golden set (golden_set.json) qua TomTatBot.summarize_with_ai() THẬT của nhánh
+DAQuan (codebase/tom_tat_bot.py — có cơ chế trích dẫn [#N] -> link nguồn, kênh thông báo riêng
+từng người) và chấm tự động.
 
-    - citation_validity : mọi [#N] AI trích có tồn tại trong input không (bịa số = fail)
-    - coverage          : bao nhiêu % tin/thông báo đầu vào được trích dẫn ít nhất 1 lần
-    - format_compliance : đúng cấu trúc bắt buộc của mode (2 nhóm ưu tiên / có liệt kê chủ đề)
+Lịch sử: bộ chấm rule-based (include/exclude/forbid_line/no_new_datetimes/no_new_numbers/
+min_bullets/max_chars) và 23/27 case gốc do Nguyễn Khắc Giáp thiết kế trên nhánh main, đo trên
+một bản bot khác (có llm_provider.py + tính năng hỏi-đáp, KHÔNG có cơ chế trích dẫn [#N]). File
+này là bản gộp: giữ nguyên bộ chấm + phần lớn case của Giáp, chuyển sang gọi đúng bot thật của
+DAQuan, và thêm check citation_valid (D2) + max_bullets (D4) cho phù hợp cơ chế trích dẫn.
 
-3 chiều trên chấm được bằng máy. Đúng-sai về NỘI DUNG (có bịa sự thật không, phân loại ưu tiên có
-hợp lý không, có bị dắt mũi bởi prompt injection không...) cần đọc transcript đầy đủ — xem cột
-"expect" trong golden_set.py và mục "manual_review" ở cuối bảng kết quả.
+Cách dùng (chạy từ thư mục gốc repo, cần OPENAI_API_KEY trong codebase/.env):
+    python eval/run_eval.py                  # lượt thật, cả 33 case
+    python eval/run_eval.py --only K3a,H02    # chỉ chạy case chỉ định
+    python eval/run_eval.py --dry-run         # không gọi AI, chỉ kiểm tra script + bộ chấm
 
-Cách dùng:
-    python run_eval.py                  # chạy cả 20 case, có gọi OpenAI API thật (cần .env)
-    python run_eval.py --case N1 C2     # chỉ chạy case chỉ định (debug nhanh)
+Đầu ra (mỗi lượt một thư mục eval/runs/<run_id>/):
+    trace.jsonl     — input gửi AI + output thô + latency từng case (bằng chứng lời gọi AI thật cho R5)
+    results.json    — kết quả từng check
+    results.md      — bảng tổng hợp để dán vào eval/run_results.md và spec.md §7
 
-Output:
-    eval/results/run-<N>-full.md     transcript đầy đủ input/output từng case (KHÔNG commit —
-                                      đã bị chặn trong .gitignore vì chứa trích dẫn dài từ data pack)
-    eval/results/run-<N>-summary.md  bảng kết quả rút gọn (trích dẫn ≤2 câu/case, kèm msg_id) —
-                                      commit được, dùng để dán vào spec.md §7
+Bộ chấm chỉ dùng luật so khớp chuỗi (không dùng LLM chấm) để người ngoài nhóm chạy lại ra đúng kết
+quả. Định nghĩa từng loại check: eval/README.md.
 """
 import argparse
 import asyncio
-import csv
-import io
+import json
 import re
 import sys
+import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
-        _stream.reconfigure(encoding="utf-8")
+        _stream.reconfigure(encoding="utf-8", line_buffering=True)
 
-HERE = Path(__file__).resolve().parent
-BOT_DIR = HERE.parent / "codebase"  # bot thật của nhóm nằm ở codebase/ (nhánh DAQuan), không phải
-sys.path.insert(0, str(BOT_DIR))    # bản tom_tat_bot.py rác còn sót lại ở gốc discord_bot/
-from tom_tat_bot import tom_tat  # noqa: E402  (đúng logic prompt + client thật của bot)
+ROOT = Path(__file__).resolve().parent.parent
+CODEBASE = ROOT / "codebase"
+sys.path.insert(0, str(CODEBASE))
 
-from golden_set import CASES  # noqa: E402
+DIM_NAMES = {
+    "D1": "Đầy đủ",
+    "D2": "Trung thực",
+    "D3": "An toàn",
+    "D4": "Đúng phạm vi & đặc thù",
+}
+GROUP_NAMES = {
+    "thuong": "Thường",
+    "kho_1_nguon_su_that": "① Nguồn sự thật",
+    "kho_2_mo_ho": "② Mơ hồ",
+    "kho_3_pham_vi": "③ Ngoài phạm vi",
+    "kho_4_domain": "④ Đặc thù domain",
+    "hiem": "Hiếm",
+}
 
-CSV_PATH = HERE.parent.parent / "K4-3A-E403-BotNotBoss" / "data" / "discord-pack" / "k4_messages.csv"
 
+# ---------------------------------------------------------------------------
+# Dựng messages_text ĐÚNG như bot thật dùng: tom_tat.format_indexed_messages() — đánh số [#N]
+# trước mỗi tin để bot trích dẫn lại, y hệt luồng /tom-tat-thong-bao và /tom-tat-tro-chuyen thật.
+# jump_url là placeholder (không có Discord thật đứng sau) — chỉ dùng để kiểm citation hợp lệ.
+# ---------------------------------------------------------------------------
+def build_items(case):
+    inp = case["input"]
+    items = []
+    for a in inp.get("announcements", []):
+        items.append({**a, "jump_url": f"https://discord.com/channels/eval/{case['id']}-{len(items)}"})
+    for m in inp.get("messages", []):
+        items.append({**m, "channel": m.get("channel", ""), "jump_url": f"https://discord.com/channels/eval/{case['id']}-{len(items)}"})
+    return items
+
+
+def build_messages_text(case, tom_tat):
+    items = build_items(case)
+    include_channel = bool(case["input"].get("announcements")) and case["mode"] == "notice"
+    text, index_to_url, _ = tom_tat.format_indexed_messages(items, include_channel=include_channel)
+    return text, len(items)
+
+
+# ---------------------------------------------------------------------------
+# Chuẩn hoá để so khớp: chữ thường, Unicode NFC, ngày về dạng d/m, giờ về dạng H:MM
+# ---------------------------------------------------------------------------
+DATE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[/-]\s*(\d{1,2})(?:\s*[/-]\s*\d{2,4})?(?!\d)")
+TIME_RE = re.compile(r"(?<![\d/])(\d{1,2})(?::(\d{2})|\s*(?:h|giờ)(?:\s*(\d{2}))?(?!\w))(?![\d/])")
+# ':' KHÔNG nằm trong tập loại trừ: thời gian "H:MM" thật đã bị regex ở numbers_in() cắt bỏ TRƯỚC
+# khi NUM_RE chạy, nên giữ ':' ở đây chỉ gây lệch giả — số ngay trước dấu ':' kiểu nhãn người nói
+# ("Học viên 01:") bị loại khỏi tập input hợp lệ, trong khi cùng số đó đứng trước dấu cách trong
+# output ("Học viên 01 báo cáo...") lại được tính — phát hiện qua case C01 (17/9).
+NUM_RE = re.compile(r"(?<![\w/])\d+(?![\w/])")
 CITATION_RE = re.compile(r"\[#(\d+)\]")
 
 
-def load_csv_index():
-    rows = list(csv.DictReader(open(CSV_PATH, encoding="utf-8-sig")))
-    return {r["msg_id"]: r for r in rows}
+def canon(text):
+    text = unicodedata.normalize("NFC", text).lower()
+    text = DATE_RE.sub(lambda m: f"{int(m.group(1))}/{int(m.group(2))}", text)
+    text = TIME_RE.sub(lambda m: f"{int(m.group(1))}:{int(m.group(2) or m.group(3) or 0):02d}", text)
+    return text
 
 
-def build_items(case, csv_index):
-    """Trả về list item {author, content, time, jump_url, channel} theo đúng thứ tự đưa vào prompt."""
-    real_items = []
-    for mid in case.get("msg_ids", []):
-        r = csv_index[mid]
-        real_items.append({
-            "author": r["author"],
-            "content": r["content"],
-            "time": r["created_at_vn"][-5:],
-            "jump_url": f"https://discord.com/channels/eval/{mid}",
-            "channel": r["channel"],
-            "_msg_id": mid,
-        })
-    synth_items = []
-    for i, it in enumerate(case.get("synthetic_items", [])):
-        synth_items.append({
-            "author": it["author"],
-            "content": it["content"],
-            "time": it["time"],
-            "jump_url": f"https://discord.com/channels/eval/synthetic-{case['id']}-{i}",
-            "channel": "synthetic",
-            "_msg_id": f"SYN-{case['id']}-{i}",
-        })
-
-    order = case.get("order")
-    if order:
-        pool = {"real": real_items, "synthetic": synth_items}
-        return [pool[kind][idx] for kind, idx in order]
-    return real_items + synth_items
+def datetimes_in(text):
+    t = canon(text)
+    dates = set(re.findall(r"(?<!\d)\d{1,2}/\d{1,2}(?!\d)", t))
+    times = set(re.findall(r"(?<!\d)\d{1,2}:\d{2}(?!\d)", t))
+    return dates, times
 
 
-def check_citation_validity(raw_summary, n_items):
-    nums = [int(m) for m in CITATION_RE.findall(raw_summary)]
+def numbers_in(text):
+    t = canon(text)
+    t = re.sub(r"\d{1,2}/\d{1,2}|\d{1,2}:\d{2}", " ", t)
+    return set(NUM_RE.findall(t))
+
+
+RATE_LIMIT_RE = re.compile(r"429|503|rate.?limit|resource.?exhausted|quota|too many requests|unavailable|high demand|overloaded", re.I)
+BULLET_RE = re.compile(r"^\s*(?:\*\*)?\s*(?:[-*•+]|\d+[.)])\s+")
+
+
+# ---------------------------------------------------------------------------
+# Các loại check (giữ nguyên bộ của Giáp, thêm max_bullets + citation_valid)
+# ---------------------------------------------------------------------------
+def check_include(chk, output, _input_text, _n_items):
+    out = canon(output)
+    lines = out.splitlines()
+    for alt in chk["any_of"]:
+        tokens = [canon(t) for t in alt]
+        if chk.get("same_line"):
+            if any(all(t in line for t in tokens) for line in lines):
+                return True, f"khớp {alt}"
+        elif all(t in out for t in tokens):
+            return True, f"khớp {alt}"
+    return False, f"không thấy bất kỳ phương án nào trong {chk['any_of']}" + (" (cùng một dòng)" if chk.get("same_line") else "")
+
+
+def check_exclude(chk, output, _input_text, _n_items):
+    out = canon(output)
+    found = [t for t in chk["tokens"] if canon(t) in out]
+    return (not found), (f"xuất hiện: {found}" if found else "không xuất hiện chuỗi cấm")
+
+
+def check_forbid_line(chk, output, _input_text, _n_items):
+    has = [canon(t) for t in chk["has"]]
+    and_any = [canon(t) for t in chk.get("and_any", [])]
+    unless_any = [canon(t) for t in chk.get("unless_any", [])]
+    for line in canon(output).splitlines():
+        if not all(t in line for t in has):
+            continue
+        if and_any and not any(t in line for t in and_any):
+            continue
+        if any(t in line for t in unless_any):
+            continue
+        return False, f"dòng vi phạm: {line.strip()[:160]}"
+    return True, "không có dòng vi phạm"
+
+
+def check_no_new_datetimes(_chk, output, input_text, _n_items):
+    in_dates, in_times = datetimes_in(input_text)
+    out_dates, out_times = datetimes_in(output)
+    new_dates = out_dates - in_dates
+
+    def time_ok(t):
+        h, mm = t.split(":")
+        alt = f"{(int(h) + 12) % 24}:{mm}"
+        return t in in_times or alt in in_times
+
+    new_times = {t for t in out_times if not time_ok(t)}
+    ok = not new_dates and not new_times
+    return ok, ("không có ngày/giờ lạ" if ok else f"ngày lạ {sorted(new_dates)} · giờ lạ {sorted(new_times)}")
+
+
+def check_no_new_numbers(_chk, output, input_text, _n_items):
+    allowed = numbers_in(input_text) | {str(i) for i in range(0, 11)}
+    # Số trong thẻ trích dẫn [#N] không tính là "số lạ" (đó là chỉ số nguồn, không phải nội dung)
+    out_no_cite = CITATION_RE.sub(" ", output)
+    new = sorted(numbers_in(out_no_cite) - allowed, key=lambda x: int(x))
+    return (not new), (f"số lạ: {new}" if new else "không có số lạ")
+
+
+def check_min_bullets(chk, output, _input_text, _n_items):
+    n = sum(1 for line in output.splitlines() if BULLET_RE.match(line))
+    return n >= chk["n"], f"{n} gạch đầu dòng (cần ≥ {chk['n']})"
+
+
+def check_max_bullets(chk, output, _input_text, _n_items):
+    n = sum(1 for line in output.splitlines() if BULLET_RE.match(line))
+    return n <= chk["n"], f"{n} gạch đầu dòng (cần ≤ {chk['n']})"
+
+
+def check_max_chars(chk, output, _input_text, _n_items):
+    return len(output) <= chk["n"], f"{len(output)} ký tự (tối đa {chk['n']})"
+
+
+def check_citation_valid(_chk, output, _input_text, n_items):
+    """D2 — mọi [#N] AI trích phải trỏ tới 1 tin có thật trong input (không bịa số)."""
+    nums = [int(m) for m in CITATION_RE.findall(output)]
     fabricated = sorted({n for n in nums if n < 1 or n > n_items})
-    ok = len(fabricated) == 0 and len(nums) > 0
-    return {"total_citations": len(nums), "fabricated": fabricated, "pass": ok}
+    ok = not fabricated
+    return ok, ("không bịa số trích dẫn" if ok else f"bịa số trích dẫn: {fabricated}")
 
 
-def check_coverage(raw_summary, n_items, mode):
-    nums = {int(m) for m in CITATION_RE.findall(raw_summary)}
-    nums = {n for n in nums if 1 <= n <= n_items}
-    ratio = (len(nums) / n_items) if n_items else 1.0
-    threshold = 1.0 if mode == "notice" else 0.5
-    return {"cited_items": len(nums), "total_items": n_items, "ratio": round(ratio, 2),
-            "threshold": threshold, "pass": ratio >= threshold}
+CHECKS = {
+    "include": check_include,
+    "exclude": check_exclude,
+    "forbid_line": check_forbid_line,
+    "no_new_datetimes": check_no_new_datetimes,
+    "no_new_numbers": check_no_new_numbers,
+    "min_bullets": check_min_bullets,
+    "max_bullets": check_max_bullets,
+    "max_chars": check_max_chars,
+    "citation_valid": check_citation_valid,
+}
 
 
-def check_format(raw_summary, mode):
-    if mode == "notice":
-        has_high = bool(re.search(r"Ưu tiên cao", raw_summary))
-        has_low = bool(re.search(r"Thông báo khác", raw_summary))
-        return {"has_high_header": has_high, "has_low_header": has_low, "pass": has_high and has_low}
-    lines = raw_summary.splitlines()
-    bullets = [l for l in lines if re.match(r"^\s{0,2}([-*•]|\d+[.)])\s+\S", l)]
-    n = len(bullets)
-    return {"topic_lines": n, "pass": 1 <= n <= 8}
+def grade(case, output, input_text, n_items):
+    results = []
+    for chk in case["checks"]:
+        ok, detail = CHECKS[chk["type"]](chk, output, input_text, n_items)
+        results.append({"type": chk["type"], "dim": chk["dim"], "passed": ok, "detail": detail, "note": chk.get("note", "")})
+    # citation_valid áp dụng cho MỌI case (không cần khai riêng trong golden_set.json) — cơ chế
+    # trích dẫn [#N] là hành vi bắt buộc của bot thật (xem prompt trong codebase/tom_tat_bot.py).
+    ok, detail = check_citation_valid(None, output, input_text, n_items)
+    results.append({"type": "citation_valid", "dim": "D2", "passed": ok, "detail": detail, "note": "áp dụng tự động cho mọi case"})
+    return results
 
 
-async def run_case(case, csv_index):
-    items = build_items(case, csv_index)
-    messages_text, index_to_url, _ = tom_tat.format_indexed_messages(
-        items, include_channel=case.get("include_channel", False)
+# ---------------------------------------------------------------------------
+# Gọi AI — dùng đúng module thật của DAQuan (client OpenAI trực tiếp, không qua llm_provider)
+# ---------------------------------------------------------------------------
+class FakeTomTat:
+    """--dry-run: không gọi mạng, chỉ thử luồng script + bộ chấm."""
+
+    def format_indexed_messages(self, items, include_channel=False, start_index=1):
+        lines, index_to_url, idx = [], {}, start_index
+        for it in items:
+            prefix = f"[#{idx}] [{it.get('time', '')}]"
+            if include_channel:
+                prefix += f" {it.get('channel', '')}:"
+            lines.append(f"{prefix} {it.get('author', '?')}: {it.get('content', '')}")
+            index_to_url[idx] = it.get("jump_url")
+            idx += 1
+        return "\n".join(lines), index_to_url, idx
+
+    async def summarize_with_ai(self, messages_text, mode="notice"):
+        lines = [l for l in messages_text.splitlines() if l.strip()]
+        return "\n".join(f"- {l}" for l in lines[:5])
+
+
+def load_summarizer(dry_run):
+    if dry_run:
+        return FakeTomTat(), "fake:echo"
+    from tom_tat_bot import tom_tat  # noqa: E402  (đúng prompt + client thật, nạp codebase/.env)
+    return tom_tat, f"openai:{__import__('tom_tat_bot').OPENAI_MODEL}"
+
+
+async def run(args):
+    golden = json.loads(Path(args.cases).read_text(encoding="utf-8"))
+    cases = golden["cases"]
+    if args.only:
+        wanted = set(args.only.split(","))
+        cases = [c for c in cases if c["id"] in wanted]
+
+    tom_tat, model = load_summarizer(args.dry_run)
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + ("-dry" if args.dry_run else "")
+    out_dir = Path(args.out) / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Lượt {run_id} · {model} · {len(cases)} case · nghỉ {args.delay}s/case · log: {out_dir / 'trace.jsonl'}")
+
+    records = []
+    with open(out_dir / "trace.jsonl", "w", encoding="utf-8", buffering=1) as trace:
+        for case in cases:
+            if records and args.delay:
+                await asyncio.sleep(args.delay)
+            input_text, n_items = build_messages_text(case, tom_tat)
+            attempts = []
+            is_error = False
+            for attempt in range(1, args.retries + 2):
+                t0 = time.perf_counter()
+                output = await tom_tat.summarize_with_ai(input_text, mode=case["mode"])
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                is_error = output.startswith("Lỗi khi tóm tắt:")
+                retryable = is_error and bool(RATE_LIMIT_RE.search(output))
+                will_retry = retryable and attempt <= args.retries
+                trace.write(json.dumps({
+                    "run_id": run_id, "case_id": case["id"], "attempt": attempt, "final": not will_retry,
+                    "model": model, "mode": case["mode"], "api_error": is_error,
+                    "latency_ms": latency_ms, "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "input_text": input_text, "output": output,
+                }, ensure_ascii=False) + "\n")
+                attempts.append({"attempt": attempt, "api_error": is_error, "latency_ms": latency_ms})
+                if not will_retry:
+                    break
+                wait = max(args.delay, 5) * 2 ** attempt
+                print(f"          … lần {attempt} lỗi tạm thời ({output[16:90].strip()}…), chờ {wait:.0f}s rồi thử lại")
+                await asyncio.sleep(wait)
+            checks = grade(case, output, input_text, n_items)
+            passed = (not is_error) and all(c["passed"] for c in checks)
+            rec = {
+                "id": case["id"], "group": case["group"], "mode": case["mode"], "title": case["title"],
+                "source": case["source"], "passed": passed, "api_error": is_error,
+                "latency_ms": latency_ms, "attempts": len(attempts), "checks": checks,
+            }
+            records.append(rec)
+            mark = "PASS" if passed else ("API-ERR" if is_error else "FAIL")
+            print(f"[{mark:7}] {case['id']:11} {case['title']} · {latency_ms} ms")
+            for c in checks:
+                if not c["passed"]:
+                    print(f"          ✗ {c['dim']} {c['type']}: {c['detail']}")
+
+    summary = summarize_records(records)
+    (out_dir / "results.json").write_text(
+        json.dumps({"run_id": run_id, "model": model, "summary": summary, "cases": records}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    raw_summary = await tom_tat.summarize_with_ai(messages_text, mode=case["mode"])
-    delivered = tom_tat.linkify_citations(raw_summary, index_to_url)
+    (out_dir / "results.md").write_text(render_markdown(run_id, model, summary, records), encoding="utf-8")
+    print(f"\nTổng: {summary['cases_passed']}/{summary['cases_total']} case đạt ({summary['case_pass_rate']}%)")
+    for dim, d in summary["by_dim"].items():
+        print(f"  {dim} {DIM_NAMES[dim]}: {d['cases_passed']}/{d['cases_total']} case ({d['rate']}%)")
+    print(f"Đã ghi: {out_dir}")
 
-    cv = check_citation_validity(raw_summary, len(items))
-    cov = check_coverage(raw_summary, len(items), case["mode"])
-    fmt = check_format(raw_summary, case["mode"])
-    auto_pass = cv["pass"] and cov["pass"] and fmt["pass"]
 
+def pct(a, b):
+    return round(100 * a / b, 1) if b else 0.0
+
+
+def summarize_records(records):
+    by_group, by_dim = {}, {}
+    for r in records:
+        g = by_group.setdefault(r["group"], {"cases_total": 0, "cases_passed": 0})
+        g["cases_total"] += 1
+        g["cases_passed"] += r["passed"]
+        for dim in sorted({c["dim"] for c in r["checks"]}):
+            d = by_dim.setdefault(dim, {"cases_total": 0, "cases_passed": 0})
+            d["cases_total"] += 1
+            d["cases_passed"] += all(c["passed"] for c in r["checks"] if c["dim"] == dim) and not r["api_error"]
+    for bucket in (*by_group.values(), *by_dim.values()):
+        bucket["rate"] = pct(bucket["cases_passed"], bucket["cases_total"])
+    total, ok = len(records), sum(r["passed"] for r in records)
     return {
-        "case": case, "n_items": len(items), "input_text": messages_text,
-        "raw_summary": raw_summary, "delivered": delivered,
-        "citation_validity": cv, "coverage": cov, "format": fmt, "auto_pass": auto_pass,
+        "cases_total": total, "cases_passed": ok, "case_pass_rate": pct(ok, total),
+        "by_group": by_group, "by_dim": dict(sorted(by_dim.items())),
+        "api_errors": sum(r["api_error"] for r in records),
+        "retried_cases": sum(r["attempts"] > 1 for r in records),
+        "avg_latency_ms": int(sum(r["latency_ms"] for r in records) / total) if total else 0,
     }
 
 
-def next_run_number():
-    results_dir = HERE / "results"
-    results_dir.mkdir(exist_ok=True)
-    existing = list(results_dir.glob("run-*-summary.md"))
-    nums = [int(re.match(r"run-(\d+)-", p.name).group(1)) for p in existing if re.match(r"run-(\d+)-", p.name)]
-    return (max(nums) + 1) if nums else 1
+def render_markdown(run_id, model, summary, records):
+    lines = [
+        f"# Kết quả eval · lượt `{run_id}`",
+        "",
+        f"- Model: `{model}` · Hàm: `TomTatBot.summarize_with_ai` (nhánh `DAQuan`, `codebase/tom_tat_bot.py`)",
+        f"- **Tổng: {summary['cases_passed']}/{summary['cases_total']} case đạt ({summary['case_pass_rate']}%)** · lỗi API: {summary['api_errors']}",
+        f"- Case phải thử lại: {summary['retried_cases']} · latency TB: {summary['avg_latency_ms']} ms",
+        "- Log đầy đủ mọi lần gọi (kể cả lần lỗi đã thử lại): `trace.jsonl`",
+        "",
+        "## Theo chiều chất lượng",
+        "",
+        "| Chiều | Case đạt | Tỷ lệ |",
+        "|---|---|---|",
+    ]
+    for dim, d in summary["by_dim"].items():
+        lines.append(f"| {dim} · {DIM_NAMES[dim]} | {d['cases_passed']}/{d['cases_total']} | {d['rate']}% |")
+    lines += ["", "## Theo nhóm case", "", "| Nhóm | Case đạt | Tỷ lệ |", "|---|---|---|"]
+    for g, d in summary["by_group"].items():
+        lines.append(f"| {GROUP_NAMES.get(g, g)} | {d['cases_passed']}/{d['cases_total']} | {d['rate']}% |")
+    lines += [
+        "", "## Từng case", "",
+        "| ID | Nhóm | Mode | Nguồn | Kết quả | Check trượt | Người chấm lại |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in records:
+        failed = "; ".join(f"{c['dim']} {c['type']}: {c['detail']}" for c in r["checks"] if not c["passed"])
+        if r["api_error"]:
+            failed = "Lỗi API — " + failed
+        verdict = "✅" if r["passed"] else "❌"
+        failed = failed.replace("|", "\\|")
+        lines.append(f"| {r['id']} | {GROUP_NAMES.get(r['group'], r['group'])} | {r['mode']} | {r['source']} | {verdict} | {failed} | |")
+    lines += [
+        "",
+        "## Phân tích case trượt",
+        "",
+        "> Điền tay: với mỗi case ❌, mở `trace.jsonl` xem output thật → lỗi ở prompt, ở model, hay ở bộ chấm quá chặt? Không sửa golden set để 'cho qua'.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def short_quote(text, max_chars=140):
-    text = text.strip().replace("\n", " ")
-    return (text[:max_chars] + "…") if len(text) > max_chars else text
-
-
-def write_reports(results, run_no):
-    results_dir = HERE / "results"
-    full_path = results_dir / f"run-{run_no}-full.md"
-    summary_path = results_dir / f"run-{run_no}-summary.md"
-
-    n_total = len(results)
-    n_auto_pass = sum(1 for r in results if r["auto_pass"])
-    pct = round(100 * n_auto_pass / n_total, 1) if n_total else 0.0
-    n_cv = sum(1 for r in results if r["citation_validity"]["pass"])
-    n_cov = sum(1 for r in results if r["coverage"]["pass"])
-    n_fmt = sum(1 for r in results if r["format"]["pass"])
-
-    with io.open(full_path, "w", encoding="utf-8") as f:
-        f.write(f"# Eval run {run_no} — transcript đầy đủ (KHÔNG commit — xem .gitignore)\n\n")
-        f.write(f"Chạy lúc: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
-        for r in results:
-            c = r["case"]
-            f.write(f"\n---\n## {c['id']} · mode={c['mode']} · {c['layer']}\n\n")
-            f.write(f"**Mô tả:** {c['desc']}\n\n**Kỳ vọng:** {c['expect']}\n\n")
-            f.write(f"**Input ({r['n_items']} tin):**\n```\n{r['input_text']}\n```\n\n")
-            f.write(f"**Output thô (trước linkify):**\n```\n{r['raw_summary']}\n```\n\n")
-            f.write(f"**Tự động chấm:** citation_validity={r['citation_validity']} | "
-                    f"coverage={r['coverage']} | format={r['format']} | auto_pass={r['auto_pass']}\n")
-
-    with io.open(summary_path, "w", encoding="utf-8") as f:
-        f.write(f"# Eval run {run_no} — bảng kết quả (dùng cho spec.md §7)\n\n")
-        f.write(f"Chạy lúc: {datetime.now().strftime('%Y-%m-%d %H:%M')} · model=gpt-4o-mini · "
-                f"{n_total} case (golden_set.py)\n\n")
-        f.write(f"**Tổng: {n_auto_pass}/{n_total} case đạt cả 3 chiều tự động ({pct}%).** "
-                f"citation_validity {n_cv}/{n_total} · coverage {n_cov}/{n_total} · "
-                f"format_compliance {n_fmt}/{n_total}.\n\n")
-        f.write("> 3 chiều dưới đây chấm được bằng máy (không bịa số trích dẫn, không bỏ sót tin, "
-                "đúng cấu trúc bắt buộc). Đúng-sai về **nội dung** (có bịa sự thật, phân loại ưu "
-                "tiên có hợp lý, có bị prompt injection dắt mũi không) cần người đọc — xem cột "
-                "'Cần người đọc lại'.\n\n")
-        f.write("| Case | Mode | Lớp/Bucket | n | citation | coverage | format | Auto | Cần người đọc lại |\n")
-        f.write("|---|---|---|---|---|---|---|---|---|\n")
-        for r in results:
-            c = r["case"]
-            cv, cov, fmt = r["citation_validity"], r["coverage"], r["format"]
-            cv_cell = "✅" if cv["pass"] else f"❌ bịa {cv['fabricated']}"
-            cov_cell = ("✅" if cov["pass"] else "❌") + f" {cov['cited_items']}/{cov['total_items']}"
-            fmt_cell = "✅" if fmt["pass"] else "❌"
-            auto_cell = "✅" if r["auto_pass"] else "❌"
-            f.write(
-                f"| {c['id']} | {c['mode']} | {','.join(c['bucket'])} | {r['n_items']} | "
-                f"{cv_cell} | {cov_cell} | {fmt_cell} | {auto_cell} | {c['layer']} |\n"
-            )
-        f.write("\n## Trích ngắn từng case (≤2 câu/ví dụ, kèm msg_id — theo luật data pack)\n\n")
-        for r in results:
-            c = r["case"]
-            first_id = c.get("msg_ids", ["(synthetic)"])[0] if c["source"] == "real" else "(synthetic)"
-            f.write(f"- **{c['id']}** ({first_id}…): {c['desc']}\n"
-                    f"  - Output (trích): _{short_quote(r['delivered'])}_\n")
-
-    return full_path, summary_path, pct
-
-
-async def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--case", nargs="*", help="chỉ chạy các case id này, vd --case N1 C2")
-    args = ap.parse_args()
-
-    csv_index = load_csv_index()
-    cases = CASES
-    if args.case:
-        wanted = set(args.case)
-        cases = [c for c in CASES if c["id"] in wanted]
-
-    results = []
-    for i, c in enumerate(cases, 1):
-        print(f"[{i}/{len(cases)}] chạy case {c['id']} (mode={c['mode']})...")
-        r = await run_case(c, csv_index)
-        results.append(r)
-        status = "OK" if r["auto_pass"] else "CHECK"
-        print(f"    -> {status} | citation={r['citation_validity']['pass']} "
-              f"coverage={r['coverage']['pass']} format={r['format']['pass']}")
-
-    run_no = next_run_number()
-    full_path, summary_path, pct = write_reports(results, run_no)
-    print(f"\nXong. {sum(1 for r in results if r['auto_pass'])}/{len(results)} case đạt cả 3 chiều tự động ({pct}%).")
-    print(f"Full transcript: {full_path}")
-    print(f"Summary (commit được): {summary_path}")
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--cases", default=str(Path(__file__).parent / "golden_set.json"))
+    ap.add_argument("--out", default=str(Path(__file__).parent / "runs"))
+    ap.add_argument("--only", help="danh sách id, cách nhau bởi dấu phẩy, ví dụ K3a,H02")
+    ap.add_argument("--delay", type=float, default=4.0, help="giây nghỉ giữa các case (tránh rate limit)")
+    ap.add_argument("--retries", type=int, default=3, help="số lần thử lại khi bị rate limit (chờ tăng dần)")
+    ap.add_argument("--dry-run", action="store_true", help="không gọi AI; dùng FakeTomTat để thử bộ chấm")
+    asyncio.run(run(ap.parse_args()))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
