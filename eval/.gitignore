@@ -1,0 +1,3 @@
+# Transcript đầy đủ chứa trích dẫn dài từ data pack — không commit (luật bảo mật data pack).
+# Bảng kết quả rút gọn (results/run-*-summary.md, trích ≤2 câu/case) thì commit được.
+results/*-full.md

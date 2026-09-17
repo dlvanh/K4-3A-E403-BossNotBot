@@ -8,10 +8,10 @@
 
 | Họ và Tên | Mã Học Viên | Vai trò chính | Phần việc đảm nhiệm trong dự án |
 |---|---|---|---|
-| Đỗ Lê Việt Anh | 2A202602491 | Team Lead |  |
-| Đoàn Anh Quân | 2A202602803 | Thành viên |  |
-| Lại Bá Quân | 2A202602495 | Thành viên |  |
-| Nguyễn Khắc Giáp | 2A202602950 | Thành viên |  |
+| Đỗ Lê Việt Anh | 2A202602491 | Team Lead | Chủ trì `spec.md` (§1-§4), nộp form CP1-CP5, điều phối tiến độ |
+| Đoàn Anh Quân | 2A202602803 | Dev / Prototype | Code bot (`codebase/tom_tat_bot.py`), golden set + eval (`eval/`), vá lỗi phát hiện qua đo lượt 1, quay video demo |
+| Lại Bá Quân | 2A202602495 | Data & Validation | Khảo sát chuẩn A (≥20 người), tổ chức vòng validation R6 với willing users |
+| Nguyễn Khắc Giáp | 2A202602950 | Eval & Quality | Thiết kế golden set theo 4 lớp chỗ khó, chốt quality bar, slide `demo-slides.pdf` |
 
 > Nhóm copy nguyên file README này về repo của mình, rồi điền bảng trên. Cột **Phần việc đảm nhiệm** ghi càng cụ thể càng tốt.
 
