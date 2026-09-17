@@ -1,0 +1,233 @@
+{
+  "run_id": "20260917-142752",
+  "summary": {
+    "range": "12/09 07:00 → 14/09 23:54",
+    "step_minutes": 60,
+    "ticks": 65,
+    "A_deadline_recall": {
+      "seen": 118,
+      "should": 136,
+      "rate": 86.8
+    },
+    "B_chat_kept": {
+      "sent": 2496,
+      "in_window": 2882,
+      "rate": 86.6
+    },
+    "C_open_question_recall": {
+      "seen": 141,
+      "should": 668,
+      "rate": 21.1,
+      "distinct_questions_invisible_while_open": 31
+    },
+    "D_stale_relative_time": {
+      "ticks_affected": 34,
+      "msg_ids": [
+        "M09449",
+        "M16114",
+        "M16982",
+        "M21817",
+        "M31445"
+      ]
+    }
+  },
+  "items": [
+    {
+      "msg_id": "M49744",
+      "guild": "K4-L2-3",
+      "label": "Hạn hoàn tất onboarding + ghép đội tự do (L2-3)",
+      "posted": "12/09 18:02",
+      "valid_until": "13/09 21:00",
+      "ticks_should_see": 26,
+      "ticks_seen": 24,
+      "first_missed": "13/09 19:00",
+      "blind_hours_total": 3.0,
+      "assumption": ""
+    },
+    {
+      "msg_id": "M21817",
+      "guild": "K4-L3-4",
+      "label": "Workshop 02 tối 13/9",
+      "posted": "13/09 08:42",
+      "valid_until": "13/09 20:00",
+      "ticks_should_see": 11,
+      "ticks_seen": 11,
+      "first_missed": null,
+      "blind_hours_total": 0.0,
+      "assumption": ""
+    },
+    {
+      "msg_id": "M16114",
+      "guild": "K4-L2-3",
+      "label": "Lab ngày 14/9 cần CVAT — cài trước",
+      "posted": "13/09 11:21",
+      "valid_until": "14/09 23:59",
+      "ticks_should_see": 36,
+      "ticks_seen": 24,
+      "first_missed": "14/09 12:00",
+      "blind_hours_total": 12.6,
+      "assumption": "Thông báo chỉ ghi 'ngày mai', không có giờ; lấy hết ngày 14/9"
+    },
+    {
+      "msg_id": "M41530",
+      "guild": "K4-L3-4",
+      "label": "Hạn hoàn tất onboarding (L3-4, remind)",
+      "posted": "14/09 09:15",
+      "valid_until": "14/09 21:00",
+      "ticks_should_see": 11,
+      "ticks_seen": 11,
+      "first_missed": null,
+      "blind_hours_total": 0.0,
+      "assumption": ""
+    },
+    {
+      "msg_id": "M09449",
+      "guild": "K4-L3-4",
+      "label": "Hạn đăng ký đề tài",
+      "posted": "13/09 21:49",
+      "valid_until": "20/09 23:59",
+      "ticks_should_see": 26,
+      "ticks_seen": 24,
+      "first_missed": "14/09 22:00",
+      "blind_hours_total": 146.2,
+      "assumption": ""
+    },
+    {
+      "msg_id": "M91836",
+      "guild": "K4-L3-4",
+      "label": "Link ngân hàng đề tài (cần tới hạn đăng ký)",
+      "posted": "13/09 22:00",
+      "valid_until": "20/09 23:59",
+      "ticks_should_see": 26,
+      "ticks_seen": 24,
+      "first_missed": "14/09 22:00",
+      "blind_hours_total": 146.0,
+      "assumption": ""
+    }
+  ],
+  "chat": [
+    {
+      "guild": "K4-L2-3",
+      "channel": "channel_02",
+      "calls_with_messages": 40,
+      "calls_truncated": 4,
+      "human_msgs_in_window": 800,
+      "human_msgs_sent_to_ai": 755,
+      "kept_rate": 94.4,
+      "worst": {
+        "at": "12/09 23:00",
+        "raw_in_window": 68,
+        "human_in_window": 68,
+        "human_sent_to_ai": 50,
+        "human_dropped": 18
+      }
+    },
+    {
+      "guild": "K4-L2-3",
+      "channel": "channel_08",
+      "calls_with_messages": 21,
+      "calls_truncated": 0,
+      "human_msgs_in_window": 196,
+      "human_msgs_sent_to_ai": 196,
+      "kept_rate": 100.0,
+      "worst": null
+    },
+    {
+      "guild": "K4-L3-4",
+      "channel": "channel_10",
+      "calls_with_messages": 60,
+      "calls_truncated": 19,
+      "human_msgs_in_window": 1286,
+      "human_msgs_sent_to_ai": 945,
+      "kept_rate": 73.5,
+      "worst": {
+        "at": "14/09 12:00",
+        "raw_in_window": 136,
+        "human_in_window": 70,
+        "human_sent_to_ai": 25,
+        "human_dropped": 45
+      }
+    },
+    {
+      "guild": "K4-L3-4",
+      "channel": "channel_11",
+      "calls_with_messages": 57,
+      "calls_truncated": 0,
+      "human_msgs_in_window": 600,
+      "human_msgs_sent_to_ai": 600,
+      "kept_rate": 100.0,
+      "worst": null
+    }
+  ],
+  "open_questions_invisible": [
+    "M01360",
+    "M02015",
+    "M04392",
+    "M09813",
+    "M12802",
+    "M14882",
+    "M18056",
+    "M19124",
+    "M21374",
+    "M27566",
+    "M28943",
+    "M30246",
+    "M33885",
+    "M36687",
+    "M40118",
+    "M42852",
+    "M48859",
+    "M57197",
+    "M60122",
+    "M66800",
+    "M67317",
+    "M67980",
+    "M71241",
+    "M83398",
+    "M84013",
+    "M87936",
+    "M88027",
+    "M91580",
+    "M97172",
+    "M97637",
+    "M99769"
+  ],
+  "stale_relative": {
+    "M31445": {
+      "posted": "13/09 08:58",
+      "words": [
+        "sáng nay"
+      ],
+      "ticks": 9
+    },
+    "M16982": {
+      "posted": "13/09 08:59",
+      "words": [
+        "hôm nay"
+      ],
+      "ticks": 9
+    },
+    "M16114": {
+      "posted": "13/09 11:21",
+      "words": [
+        "ngày mai"
+      ],
+      "ticks": 12
+    },
+    "M21817": {
+      "posted": "13/09 08:42",
+      "words": [
+        "hôm nay",
+        "tối nay"
+      ],
+      "ticks": 9
+    },
+    "M09449": {
+      "posted": "13/09 21:49",
+      "words": [
+        "hôm nay"
+      ],
+      "ticks": 22
+    }
+  }
+}

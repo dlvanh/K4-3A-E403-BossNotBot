@@ -1,0 +1,29 @@
+{
+  "note": "Nhãn đáp án cho timeline_replay.py. Chỉ ghi msg_id + nhãn diễn đạt lại, không chép nội dung data pack. valid_until = thời điểm thông tin hết giá trị (hạn chót hoặc giờ diễn ra sự kiện). Đáp án ĐƯỢC dùng thông tin tương lai; đầu vào của bot thì KHÔNG.",
+  "bot_params": {
+    "announcement_window_hours": 24,
+    "announcement_limit_per_channel": 20,
+    "chat_window_hours": 4,
+    "chat_limit": 50,
+    "source": "codebase/tom_tat_bot.py — get_channel_announcements(hours=24, limit=20), get_recent_messages(hours=4, limit=MESSAGE_LIMIT=50)"
+  },
+  "channels": {
+    "K4-L2-3": {
+      "announcement": ["channel_03", "channel_04", "channel_05", "channel_07"],
+      "chat": ["channel_02", "channel_08"]
+    },
+    "K4-L3-4": {
+      "announcement": ["channel_12"],
+      "chat": ["channel_10", "channel_11"]
+    },
+    "_why": "Phân loại theo nội dung quan sát được (xem phân tích kênh). channel_06 là kênh hỗ trợ/cá nhân nên không xếp vào nhóm nào."
+  },
+  "time_bound_items": [
+    {"msg_id": "M49744", "guild": "K4-L2-3", "label": "Hạn hoàn tất onboarding + ghép đội tự do (L2-3)", "valid_until": "2026-09-13 21:00"},
+    {"msg_id": "M21817", "guild": "K4-L3-4", "label": "Workshop 02 tối 13/9", "valid_until": "2026-09-13 20:00"},
+    {"msg_id": "M16114", "guild": "K4-L2-3", "label": "Lab ngày 14/9 cần CVAT — cài trước", "valid_until": "2026-09-14 23:59", "assumption": "Thông báo chỉ ghi 'ngày mai', không có giờ; lấy hết ngày 14/9"},
+    {"msg_id": "M41530", "guild": "K4-L3-4", "label": "Hạn hoàn tất onboarding (L3-4, remind)", "valid_until": "2026-09-14 21:00"},
+    {"msg_id": "M09449", "guild": "K4-L3-4", "label": "Hạn đăng ký đề tài", "valid_until": "2026-09-20 23:59"},
+    {"msg_id": "M91836", "guild": "K4-L3-4", "label": "Link ngân hàng đề tài (cần tới hạn đăng ký)", "valid_until": "2026-09-20 23:59"}
+  ]
+}

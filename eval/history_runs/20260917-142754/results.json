@@ -1,0 +1,207 @@
+{
+  "run_id": "20260917-142754",
+  "model": "openai:gpt-5.6-luna",
+  "include_bot": false,
+  "max_history": 150,
+  "summary": {
+    "total": 10,
+    "grounded_ok": 10,
+    "grounded_rate": 100.0,
+    "by_kind": {
+      "nói không tìm thấy / không xem được": 1,
+      "trả lời có trích dẫn": 9
+    },
+    "fabricated_citation_answers": 0,
+    "future_citation_answers": 0,
+    "total_tokens": 68568,
+    "avg_history_msgs": 125
+  },
+  "questions": [
+    {
+      "question_id": "M56157",
+      "asked_at": "12/09 06:57",
+      "guild": "K4-L3-4",
+      "history_msgs": 0,
+      "kind": "nói không tìm thấy / không xem được",
+      "cited": [],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 3246,
+      "total_tokens": 427,
+      "old_bot_reply_id": "M83291"
+    },
+    {
+      "question_id": "M72229",
+      "asked_at": "12/09 18:52",
+      "guild": "K4-L3-4",
+      "history_msgs": 64,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M00499"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 4818,
+      "total_tokens": 3603,
+      "old_bot_reply_id": "M16680"
+    },
+    {
+      "question_id": "M96792",
+      "asked_at": "13/09 11:14",
+      "guild": "K4-L3-4",
+      "history_msgs": 139,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M14918",
+        "M26655",
+        "M44966",
+        "M47007",
+        "M78232"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 5927,
+      "total_tokens": 7583,
+      "old_bot_reply_id": "M23879"
+    },
+    {
+      "question_id": "M39235",
+      "asked_at": "13/09 21:08",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M21817",
+        "M24366"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 9247,
+      "total_tokens": 7829,
+      "old_bot_reply_id": "M16492"
+    },
+    {
+      "question_id": "M12653",
+      "asked_at": "13/09 23:41",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M09449"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 3795,
+      "total_tokens": 8348,
+      "old_bot_reply_id": "M90248"
+    },
+    {
+      "question_id": "M31759",
+      "asked_at": "14/09 09:02",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M49863",
+        "M76564"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 5486,
+      "total_tokens": 8513,
+      "old_bot_reply_id": "M06366"
+    },
+    {
+      "question_id": "M81080",
+      "asked_at": "14/09 10:12",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M01069",
+        "M67171"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 2265,
+      "total_tokens": 8360,
+      "old_bot_reply_id": "M96596"
+    },
+    {
+      "question_id": "M02078",
+      "asked_at": "14/09 13:19",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M41530",
+        "M47177"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 6063,
+      "total_tokens": 8314,
+      "old_bot_reply_id": "M47687"
+    },
+    {
+      "question_id": "M04785",
+      "asked_at": "14/09 16:12",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M46207"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 3998,
+      "total_tokens": 8156,
+      "old_bot_reply_id": "M59385"
+    },
+    {
+      "question_id": "M82163",
+      "asked_at": "14/09 19:35",
+      "guild": "K4-L3-4",
+      "history_msgs": 150,
+      "kind": "trả lời có trích dẫn",
+      "cited": [
+        "M78917"
+      ],
+      "fabricated_citations": [],
+      "future_citations": [],
+      "citations_outside_history": [],
+      "grounded_ok": true,
+      "api_error": false,
+      "latency_ms": 5245,
+      "total_tokens": 7435,
+      "old_bot_reply_id": "M73469"
+    }
+  ]
+}
