@@ -167,9 +167,24 @@ chạy qua bot thật ngày 17/9, xem `eval/run_results.md`. msg_id trỏ về `
   Cả ba lượt chưa đạt quality bar vì chiều D3 An toàn không đạt 100%. Lỗi của bot được xác định qua đối chiếu output thật: K3b liệt kê tin chèn lệnh thành một mục thông báo ở cả ba lượt; K4c nêu tên học viên ở lượt 1; N04 ghi sai giờ đăng tin ở lượt 2. Các case K3a, K2b, K1b và C05 có output với hành vi phù hợp nhưng bị bộ chấm đánh trượt do giới hạn của luật so khớp. Kết quả lượt 1 là kết quả chấm lại sau khi sửa một lỗi của bộ chấm; kết quả chấm gốc (21/27) được giữ trong `eval/runs/20260917-142517/results.md`.
 
 ## §8. Phân công & kế hoạch
-- Phân công có tên: spec / evidence / prompt / code / demo
-- Willing users (≥2 tên) + kế hoạch vòng validation *(bonus, nếu làm)*:
-- Multi-prototype (nếu làm): trục khác biệt của ≥2 phương án + lý do chọn:
+| Việc | Người phụ trách |
+|---|---|
+| Spec / điều phối / bảo vệ trước giám khảo | Đỗ Lê Việt Anh |
+| Prototype / code / prompt / video demo | Đoàn Anh Quân |
+| Mining data / khảo sát người dùng / validation | Lại Bá Quân |
+| Golden set / đo lường / slide | Nguyễn Khắc Giáp |
+
+- 🔲 **Willing users**:
+    - Nguyễn Thị Minh Khánh - 2A202602546
+    - Lưu Mạnh Hùng - 2A202602942
 
 ## §9. Changelog
 | Thời điểm | Đổi gì | Vì sao (trỏ về feedback/case nào) |
+|---|---|---|
+| 17/9 ~14:00-14:40 | Xây `eval/golden_set.py` (20 case) + `eval/run_eval.py`, chạy lượt 1 thật | Chuẩn bị số đo CP3 theo yêu cầu "thử bao nhiêu, đúng bao nhiêu" |
+| 17/9 ~14:40 | Đọc tay transcript, phát hiện: (a) phân loại ưu tiên không nhất quán cho thông báo không có hạn cụ thể, (b) 1 case mô phỏng prompt injection cho thấy nguy cơ bot có thể bị lừa | Input cho vòng vá tiếp theo |
+| 17/9 ~15:00-15:20 | Sửa `codebase/tom_tat_bot.py`: thêm `ANTI_INJECTION_GUARD` (chặn lệnh giả nhúng trong tin nhắn) + quy tắc không bịa chủ đề khi input rỗng + không bịa deadline/mức khẩn cấp | Phát hiện thật qua test thủ công: input mô phỏng kiểu K3a khiến bot khẳng định tin bịa như sự thật 5/5 lần trước khi vá; input gần rỗng khiến bot bịa 4 chủ đề ảo trước khi vá |
+| 17/9 ~15:20-17:00 | Chạy lại lượt 3 (bộ 20 case cũ, đã vá): 17/20 (85%), citation 100%, format 100%; mining evidence chuẩn B cho §1; viết `spec.md` đầy đủ | Hoàn thiện hạn chốt spec CP4 (21:00 17/9) |
+| 17/9 ~15:30-16:05 | Gộp golden set 20 case của Anh Quân với 27 case gốc của Giáp thành 1 bộ 33 case (`eval/golden_set.json`), viết lại `eval/run_eval.py` để chạy đúng trên bot thật `codebase/tom_tat_bot.py` (có cơ chế trích dẫn `[#N]`) thay vì bản `main` không có cơ chế này; xoá bộ cũ + các lượt chạy cũ, chỉ giữ 1 golden set + 1 `eval/run_results.md` | Yêu cầu chuẩn bị slide — cần 1 nguồn số liệu duy nhất, không mâu thuẫn giữa spec.md và slide |
+| 17/9 ~16:05-16:15 | Chạy bộ gộp, phát hiện thêm 2 lỗi bot thật: (a) câu giải thích tiêu đề trong prompt bị model chép lại làm nội dung, (b) input thông báo **hoàn toàn rỗng** khiến bot bịa nguyên 4 thông báo giả (nghiêm trọng hơn case input-gần-rỗng đã vá trước đó). Vá cả 2 trong `codebase/tom_tat_bot.py`; đồng thời sửa 2 lỗi trong bộ chấm (`NUM_RE` loại số trước dấu `:` sai, thiếu từ đồng nghĩa "ban đầu" ở case K2b) | Phát hiện qua chạy thật, không phải suy đoán |
+| 17/9 ~16:15 | Chạy lại lượt chính thức (33 case): 28/33 (84.8%), D2 Trung thực 100%, D3 An toàn 75% (nhưng đọc tay xác nhận 0/5 case trượt là lỗi bot thật — xem §7) | Số liệu cuối cùng cho §7 + slide CP5 |
