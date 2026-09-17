@@ -89,7 +89,7 @@ class Preset:
 
 
 PRESETS = {
-    "openai": Preset(None, "gpt-4o-mini", "OPENAI_API_KEY", "max_completion_tokens"),
+    "openai": Preset(None, "gpt-5.6-luna", "OPENAI_API_KEY", "max_completion_tokens"),
     "nvidia": Preset("https://integrate.api.nvidia.com/v1", "openai/gpt-oss-120b", "NVIDIA_API_KEY"),
     "gemini": Preset("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.8-flash", "GEMINI_API_KEY"),
     "anthropic": Preset("https://api.anthropic.com/v1/", "claude-haiku-4-5", "ANTHROPIC_API_KEY"),
