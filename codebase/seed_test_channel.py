@@ -1,7 +1,7 @@
 """
 seed_test_channel.py — Bơm tin nhắn MẪU (tự viết, KHÔNG phải dữ liệu K4 thật)
 vào MỘT kênh trò chuyện test, mô phỏng học viên hỏi-đáp qua lại. Dùng để demo
-/tom-tat-tro-chuyen hoặc /tom-tat-chung (kênh có "chung" trong tên).
+/tom-tat-tro-chuyen.
 
 Vì sao dùng tin tự viết thay vì dán lại k4_messages.csv:
     Pack dữ liệu K4 chỉ được dùng CỤC BỘ để phân tích/test (xem README của
@@ -18,7 +18,7 @@ Cách dùng:
     1. Trong kênh test của bạn (tên gợi ý: "chung" hoặc "trò-chuyện"):
        Cài đặt kênh → Tích hợp → Webhook → New Webhook → Copy Webhook URL
     2. python seed_test_channel.py --webhook "<url>"
-    3. Chạy /tom-tat-tro-chuyen hoặc /tom-tat-chung trong kênh đó để demo.
+    3. Chạy /tom-tat-tro-chuyen trong kênh đó để demo.
 
 Muốn seed thêm các kênh #thông-báo-* riêng biệt để test /tom-tat-thong-bao
 (lệnh này gom tất cả kênh có "thông-báo"/"announce" trong tên) thì dùng:
@@ -56,7 +56,7 @@ def main():
 
     ok = seed_lib.send_messages(args.webhook, SAMPLE_MESSAGES, args.delay)
     if ok:
-        print("\nXong. Giờ chạy /tom-tat-tro-chuyen hoặc /tom-tat-chung trong kênh này để demo bot thật.")
+        print("\nXong. Giờ chạy /tom-tat-tro-chuyen trong kênh này để demo bot thật.")
 
 
 if __name__ == "__main__":

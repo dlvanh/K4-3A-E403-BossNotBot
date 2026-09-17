@@ -47,7 +47,9 @@ Sau khi bot online trong Discord:
 ```
 /tom-tat-thong-bao              → Tóm tắt thông báo
 /tom-tat-tro-chuyen #kênh      → Tóm tắt kênh
-/tom-tat-chung                  → Tóm tắt toàn bộ
+/them-kenh-thong-bao            → Đăng ký kênh thông báo
+/xoa-kenh-thong-bao             → Bỏ đăng ký kênh thông báo
+/ds-kenh-thong-bao              → Xem danh sách kênh đã đăng ký
 ```
 
 ---

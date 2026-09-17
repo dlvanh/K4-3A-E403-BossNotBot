@@ -1,7 +1,9 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timedelta
 import json
+import re
 from openai import AsyncOpenAI
 import os
 import sys
@@ -34,49 +36,92 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_conf
 class TomTatBot:
     def __init__(self):
         self.conversation_history = {}
-        # {guild_id (str): [channel_id, ...]}
-        self.announcement_channels = self._load_config()
+        # {guild_id (str): {user_id (str): [channel_id, ...]}} — MỖI NGƯỜI 1 danh sách riêng
+        self.announcement_channels = {}
+        # {guild_id (str): [user_id (str), ...]} — người đã được auto_detect_channels_for_user() seed lần đầu
+        self.scanned_users = {}
+        self._load_config()
 
     def _load_config(self):
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    return json.load(f).get("announcement_channels", {})
+                    data = json.load(f)
+                raw_channels = data.get("announcement_channels", {})
+                # Tương thích ngược: bản cũ lưu 1 danh sách DÙNG CHUNG cho cả guild (list),
+                # không tách theo người. Bỏ dữ liệu dạng cũ đó, người dùng sẽ tự được seed lại
+                # danh sách riêng ở lần đầu gọi lệnh kế tiếp — an toàn hơn cố gắng đoán ai sở hữu gì.
+                self.announcement_channels = {
+                    gid: users for gid, users in raw_channels.items() if isinstance(users, dict)
+                }
+                raw_scanned = data.get("scanned_users", {})
+                self.scanned_users = raw_scanned if isinstance(raw_scanned, dict) else {}
             except Exception as e:
                 print(f"Lỗi đọc config: {e}")
-        return {}
 
     def _save_config(self):
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump({"announcement_channels": self.announcement_channels}, f, ensure_ascii=False, indent=2)
+                json.dump({
+                    "announcement_channels": self.announcement_channels,
+                    "scanned_users": self.scanned_users,
+                }, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"Lỗi lưu config: {e}")
 
-    def add_announcement_channel(self, guild_id, channel_id):
-        """Đăng ký 1 kênh làm nguồn thông báo. Trả về False nếu đã đăng ký từ trước."""
-        key = str(guild_id)
-        channels = self.announcement_channels.setdefault(key, [])
+    def add_announcement_channel(self, guild_id, user_id, channel_id):
+        """Đăng ký 1 kênh làm nguồn thông báo CHO RIÊNG 1 người dùng. Trả về False nếu đã đăng ký từ trước."""
+        channels = self.announcement_channels.setdefault(str(guild_id), {}).setdefault(str(user_id), [])
         if channel_id in channels:
             return False
         channels.append(channel_id)
         self._save_config()
         return True
 
-    def remove_announcement_channel(self, guild_id, channel_id):
-        """Bỏ đăng ký 1 kênh khỏi nguồn thông báo. Trả về False nếu chưa từng đăng ký."""
-        key = str(guild_id)
-        channels = self.announcement_channels.get(key, [])
+    def remove_announcement_channel(self, guild_id, user_id, channel_id):
+        """Bỏ đăng ký 1 kênh khỏi nguồn thông báo của 1 người dùng. Trả về False nếu chưa từng đăng ký."""
+        channels = self.announcement_channels.get(str(guild_id), {}).get(str(user_id), [])
         if channel_id not in channels:
             return False
         channels.remove(channel_id)
         self._save_config()
         return True
 
-    def get_registered_announcement_channels(self, guild):
-        """Trả về danh sách discord.TextChannel đã đăng ký cho guild này (bỏ qua kênh đã bị xoá/mất quyền)."""
-        ids = self.announcement_channels.get(str(guild.id), [])
+    def get_registered_announcement_channels(self, guild, user_id):
+        """Trả về danh sách discord.TextChannel đã đăng ký cho RIÊNG người dùng này
+        (bỏ qua kênh đã bị xoá/mất quyền)."""
+        ids = self.announcement_channels.get(str(guild.id), {}).get(str(user_id), [])
         return [ch for cid in ids if (ch := guild.get_channel(cid)) is not None]
+
+    def is_user_scanned(self, guild_id, user_id):
+        return str(user_id) in self.scanned_users.get(str(guild_id), [])
+
+    def mark_user_scanned(self, guild_id, user_id):
+        users = self.scanned_users.setdefault(str(guild_id), [])
+        uid = str(user_id)
+        if uid not in users:
+            users.append(uid)
+            self._save_config()
+
+    def auto_detect_channels_for_user(self, guild, user_id):
+        """Tự động đăng ký các kênh có tên chứa 'thông-báo'/'announce' vào danh sách RIÊNG
+        của 1 người dùng — mỗi người đều bắt đầu với cùng bộ kênh "gốc" này. Sau đó danh
+        sách của người đó hoàn toàn do họ tự kiểm soát qua /them-kenh-thong-bao và
+        /xoa-kenh-thong-bao, không bị bot tự thêm lại. Trả về số kênh vừa thêm."""
+        keywords = ('thông-báo', 'thong-bao', 'announce')
+        added_count = 0
+        for ch in guild.text_channels:
+            if any(k in ch.name.lower() for k in keywords):
+                if self.add_announcement_channel(guild.id, user_id, ch.id):
+                    added_count += 1
+        return added_count
+
+    def ensure_user_seeded(self, guild, user_id):
+        """Gọi ở đầu mỗi lệnh liên quan tới kênh thông báo: nếu đây là lần đầu người này
+        dùng bot trong server này, tự động điền sẵn các kênh "thông-báo" làm điểm khởi đầu."""
+        if not self.is_user_scanned(guild.id, user_id):
+            self.auto_detect_channels_for_user(guild, user_id)
+            self.mark_user_scanned(guild.id, user_id)
 
     async def get_recent_messages(self, channel, hours=4):
         """Lấy tin nhắn gần đây từ một channel"""
@@ -102,16 +147,16 @@ class TomTatBot:
         except Exception as e:
             print(f"Lỗi khi lấy tin nhắn: {e}")
             return []
-    
-    async def get_channel_announcements(self, guild, hours=24):
-        """Lấy các thông báo từ các kênh đã đăng ký (ưu tiên); nếu guild chưa
-        đăng ký kênh nào thì suy đoán theo tên kênh (có dấu hoặc không dấu)."""
+
+    async def get_channel_announcements(self, guild, user_id, hours=24):
+        """Lấy các thông báo từ các kênh đã đăng ký RIÊNG cho user_id này; nếu người này
+        chưa có kênh nào (hiếm, vì ensure_user_seeded đã chạy trước) thì suy đoán theo tên kênh."""
         announcements = []
         time_threshold = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=hours)
 
-        target_channels = self.get_registered_announcement_channels(guild)
+        target_channels = self.get_registered_announcement_channels(guild, user_id)
         if not target_channels:
-            # Chưa ai đăng ký kênh nào bằng /them-kenh-thong-bao: suy đoán theo tên
+            # Trường hợp hiếm: chưa được ensure_user_seeded() seed (vd lỗi lúc gọi lệnh)
             keywords = ('thông-báo', 'thong-bao', 'announce')
             target_channels = [
                 ch for ch in guild.text_channels
@@ -139,33 +184,38 @@ class TomTatBot:
             print(f"Lỗi khi lấy thông báo: {e}")
 
         return announcements
-    
+
     async def summarize_with_ai(self, messages_text, mode="notice"):
         """Sử dụng OpenAI để tóm tắt tin nhắn"""
         prompts = {
-            "notice": """Dựa vào các thông báo sau, hãy tóm tắt lại TẤT CẢ, không được bỏ sót bất kỳ thông báo nào (không giới hạn số điểm, có bao nhiêu thông báo thì liệt kê hết bấy nhiêu):
-- Mỗi thông báo là một điểm riêng, sắp xếp theo độ ưu tiên (việc gấp nhất trước)
-- Rút gọn vào 1-2 dòng cho mỗi điểm, nhưng không được gộp nhiều thông báo khác nội dung vào chung một điểm
+            "notice": """Dựa vào các thông báo sau (mỗi tin có đánh số [#N] ở đầu dòng), hãy tóm tắt lại TẤT CẢ, không được bỏ sót bất kỳ thông báo nào (không giới hạn số điểm, có bao nhiêu thông báo thì liệt kê hết bấy nhiêu). CHIA THÀNH ĐÚNG 2 NHÓM theo mức độ ưu tiên, viết đúng 2 tiêu đề sau (in đậm):
+
+**🔴 Ưu tiên cao**
+(các thông báo có deadline gấp trong 1-2 ngày tới, ảnh hưởng nhiều người, hoặc cần hành động ngay)
+
+**⚪ Thông báo khác**
+(các thông báo còn lại)
+
+Quy tắc:
+- Trong mỗi nhóm, mỗi thông báo là một điểm riêng, không được gộp nhiều thông báo khác nội dung vào chung một điểm
+- Trong mỗi nhóm, sắp xếp theo độ ưu tiên giảm dần (việc gấp nhất trước)
+- Rút gọn vào 1-2 dòng cho mỗi điểm
 - Bao gồm deadline nếu có
+- Nếu một nhóm không có thông báo nào phù hợp thì vẫn giữ tiêu đề nhóm và ghi "(không có)", không được bỏ hẳn tiêu đề
+- BẮT BUỘC: cuối mỗi điểm, thêm số [#N] của (các) tin bạn dựa vào để viết điểm đó, y hệt số đã cho trong dữ liệu (vd "...23:59 ngày mai. [#3]"). Nếu dựa vào nhiều tin thì viết liền nhiều thẻ, vd [#3][#5]. Không được bịa số không có trong dữ liệu, không được bỏ qua thẻ này ở bất kỳ điểm nào.
 
 Thông báo:
 """,
-            "chat": """Dựa vào đoạn trò chuyện sau, hãy tóm tắt các chủ đề chính được bàn luận:
+            "chat": """Dựa vào đoạn trò chuyện sau (mỗi tin có đánh số [#N] ở đầu dòng), hãy tóm tắt các chủ đề chính được bàn luận:
 - Liệt kê 3-5 chủ đề chính
 - Ghi lại vấn đề/câu hỏi chưa có lời giải
 - Rút gọn mỗi chủ đề vào 2-3 dòng
+- BẮT BUỘC: cuối mỗi chủ đề (hoặc mỗi câu hỏi/vấn đề liệt kê), thêm số [#N] của (các) tin bạn dựa vào, y hệt số đã cho trong dữ liệu. Nhiều tin thì viết liền [#3][#5]. Không bịa số, không bỏ qua thẻ này.
 
 Trò chuyện:
-""",
-            "all": """Tóm tắt toàn bộ hoạt động của server (thông báo + trò chuyện):
-- Phần 1: TẤT CẢ thông báo (deadline, thay đổi) — không giới hạn số lượng, liệt kê đủ, không bỏ sót cái nào
-- Phần 2: Các chủ đề chính đang bàn luận
-- Phần 3: Những vấn đề chưa được giải quyết
-
-Dữ liệu:
 """
         }
-        
+
         prompt = prompts.get(mode, prompts["notice"]) + messages_text
 
         try:
@@ -179,10 +229,38 @@ Dữ liệu:
             return response.choices[0].message.content
         except Exception as e:
             return f"Lỗi khi tóm tắt: {str(e)}"
-    
+
+    CITATION_RE = re.compile(r'\[#(\d+)\]')
+
+    def format_indexed_messages(self, items, include_channel=False, start_index=1):
+        """Đánh số [#N] trước mỗi tin nhắn để AI trích dẫn lại trong bản tóm tắt.
+        Trả về (text, index_to_url, next_index) — next_index dùng để nối tiếp số thứ tự
+        khi ghép nhiều đoạn (vd thông báo rồi tới trò chuyện trong mode 'all')."""
+        lines = []
+        index_to_url = {}
+        idx = start_index
+        for it in items:
+            prefix = f"[#{idx}] [{it.get('time', '')}]"
+            if include_channel:
+                prefix += f" {it.get('channel', '')}:"
+            lines.append(f"{prefix} {it.get('author', '?')}: {it.get('content', '')}")
+            index_to_url[idx] = it.get('jump_url')
+            idx += 1
+        return "\n".join(lines), index_to_url, idx
+
+    def linkify_citations(self, text, index_to_url):
+        """Thay các trích dẫn [#N] mà AI viết trong bản tóm tắt bằng link nhảy thẳng tới
+        tin nhắn gốc trên Discord. Số không khớp tin nào (AI bịa) thì lặng lẽ bỏ đi."""
+        def repl(match):
+            idx = int(match.group(1))
+            url = index_to_url.get(idx)
+            return f"[[nguồn]]({url})" if url else ""
+        text = self.CITATION_RE.sub(repl, text)
+        return re.sub(r'[ \t]{2,}', ' ', text)
+
     def format_sources_field(self, items, max_items=10, max_chars=900):
-        """Dựng nội dung field liệt kê tin nhắn nguồn (kèm link nhảy tới tin gốc)
-        để người xem đối chiếu với bản tóm tắt AI. Trả về None nếu không có gì."""
+        """Dựng nội dung liệt kê tin nhắn nguồn (kèm link nhảy tới tin gốc) để người xem
+        đối chiếu với bản tóm tắt AI. Trả về None nếu không có gì."""
         if not items:
             return None
         lines = []
@@ -254,243 +332,213 @@ Dữ liệu:
 # Tạo instance của bot
 tom_tat = TomTatBot()
 
+
+async def send_report(interaction: discord.Interaction, source_sections, summary_text, title):
+    """Gửi kết quả dạng ephemeral (chỉ người gọi lệnh thấy): (các) embed tin nhắn NGUỒN
+    trước, rồi mới tới (các) embed TÓM TẮT — đúng thứ tự đọc: xem nguồn trước, đọc AI diễn giải sau.
+    source_sections: list[(tên, nội_dung)], bỏ qua mục có nội_dung rỗng/None.
+    Toàn bộ nội dung dùng interaction.edit_original_response cho phần đầu tiên (thay chỗ
+    embed "đang xử lý"), các phần còn lại dùng followup.send(ephemeral=True)."""
+    summary_embeds = tom_tat.build_summary_embeds(summary_text, title)
+
+    to_send = []
+    for name, content in source_sections:
+        if content:
+            to_send.append(discord.Embed(title=f"📨 {name}", description=content, color=discord.Color.greyple()))
+    to_send.extend(summary_embeds)
+
+    for i, embed in enumerate(to_send):
+        if i == 0:
+            await interaction.edit_original_response(embed=embed)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+async def safe_error_reply(interaction: discord.Interaction, error):
+    """Báo lỗi cho đúng người gọi lệnh (ephemeral), dùng được cả khi đã defer hay chưa."""
+    message = f"❌ Lỗi: {str(error)}"
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except Exception as e:
+        print(f"Lỗi khi báo lỗi cho người dùng: {e}")
+
+
+async def setup_guild(guild: discord.Guild):
+    """Đồng bộ slash command tức thì cho 1 server (copy từ tree toàn cục sang guild này,
+    không phải chờ tối đa 1h như sync toàn cục). Việc seed kênh thông báo mặc định giờ
+    làm RIÊNG cho từng người dùng (xem TomTatBot.ensure_user_seeded), không còn làm 1 lần
+    chung cho cả server ở đây nữa."""
+    try:
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"[debug] Đã đồng bộ {len(synced)} lệnh slash cho server '{guild.name}'")
+    except Exception as e:
+        print(f"Lỗi đồng bộ lệnh cho server '{guild.name}': {e}")
+
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} đã kết nối!')
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name="/tom-tat-*"))
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/ để xem lệnh"))
+    for guild in bot.guilds:
+        await setup_guild(guild)
 
-@bot.command(name='them-kenh-thong-bao', description='Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo')
-async def them_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
-    """Đăng ký 1 kênh làm nguồn cho /tom-tat-thong-bao, nhớ đến khi bị xoá bằng /xoa-kenh-thong-bao"""
-    if kênh is None:
-        kênh = ctx.channel
 
-    added = tom_tat.add_announcement_channel(ctx.guild.id, kênh.id)
+@bot.event
+async def on_guild_join(guild):
+    await setup_guild(guild)
+
+
+@bot.tree.command(name='them-kenh-thong-bao', description='Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo')
+@app_commands.describe(kenh='Kênh cần đăng ký (bỏ trống = kênh hiện tại)')
+async def them_kenh_thong_bao(interaction: discord.Interaction, kenh: discord.TextChannel = None):
+    """Đăng ký 1 kênh làm nguồn cho /tom-tat-thong-bao CỦA RIÊNG BẠN, nhớ đến khi bị xoá bằng /xoa-kenh-thong-bao"""
+    if kenh is None:
+        kenh = interaction.channel
+
+    tom_tat.ensure_user_seeded(interaction.guild, interaction.user.id)
+    added = tom_tat.add_announcement_channel(interaction.guild.id, interaction.user.id, kenh.id)
     if added:
-        await ctx.send(f"✅ Đã đăng ký {kênh.mention} làm kênh thông báo. Từ giờ `/tom-tat-thong-bao` sẽ luôn đọc kênh này, kể cả sau khi khởi động lại bot — đến khi bạn bỏ đăng ký bằng `/xoa-kenh-thong-bao`.")
+        await interaction.response.send_message(
+            f"✅ Đã đăng ký {kenh.mention} làm kênh thông báo của riêng bạn. Từ giờ `/tom-tat-thong-bao` của bạn sẽ luôn đọc kênh này, "
+            f"kể cả sau khi khởi động lại bot — đến khi bạn bỏ đăng ký bằng `/xoa-kenh-thong-bao`. Không ảnh hưởng tới danh sách của người khác.",
+            ephemeral=True
+        )
     else:
-        await ctx.send(f"{kênh.mention} đã được đăng ký từ trước rồi.")
+        await interaction.response.send_message(f"{kenh.mention} đã có trong danh sách của bạn từ trước rồi.", ephemeral=True)
 
-@bot.command(name='xoa-kenh-thong-bao', description='Bỏ đăng ký kênh này (hoặc kênh chỉ định) khỏi nguồn thông báo')
-async def xoa_kenh_thong_bao(ctx, kênh: discord.TextChannel = None):
-    """Bỏ đăng ký 1 kênh khỏi nguồn thông báo"""
-    if kênh is None:
-        kênh = ctx.channel
 
-    removed = tom_tat.remove_announcement_channel(ctx.guild.id, kênh.id)
+@bot.tree.command(name='xoa-kenh-thong-bao', description='Bỏ đăng ký kênh này (hoặc kênh chỉ định) khỏi nguồn thông báo của bạn')
+@app_commands.describe(kenh='Kênh cần bỏ đăng ký (bỏ trống = kênh hiện tại)')
+async def xoa_kenh_thong_bao(interaction: discord.Interaction, kenh: discord.TextChannel = None):
+    """Bỏ đăng ký 1 kênh khỏi nguồn thông báo CỦA RIÊNG BẠN — kể cả kênh bot tự seed sẵn ban đầu"""
+    if kenh is None:
+        kenh = interaction.channel
+
+    tom_tat.ensure_user_seeded(interaction.guild, interaction.user.id)
+    removed = tom_tat.remove_announcement_channel(interaction.guild.id, interaction.user.id, kenh.id)
     if removed:
-        await ctx.send(f"🚫 Đã bỏ {kênh.mention} khỏi danh sách kênh thông báo.")
+        await interaction.response.send_message(f"🚫 Đã bỏ {kenh.mention} khỏi danh sách kênh thông báo của bạn.", ephemeral=True)
     else:
-        await ctx.send(f"{kênh.mention} chưa được đăng ký trước đó.")
+        await interaction.response.send_message(f"{kenh.mention} chưa có trong danh sách của bạn.", ephemeral=True)
 
-@bot.command(name='ds-kenh-thong-bao', description='Xem danh sách kênh thông báo đã đăng ký')
-async def ds_kenh_thong_bao(ctx):
-    """Liệt kê các kênh đã đăng ký làm nguồn thông báo cho server này"""
-    channels = tom_tat.get_registered_announcement_channels(ctx.guild)
+
+@bot.tree.command(name='ds-kenh-thong-bao', description='Xem danh sách kênh thông báo bạn đã đăng ký')
+async def ds_kenh_thong_bao(interaction: discord.Interaction):
+    """Liệt kê các kênh đã đăng ký làm nguồn thông báo CỦA RIÊNG BẠN"""
+    tom_tat.ensure_user_seeded(interaction.guild, interaction.user.id)
+    channels = tom_tat.get_registered_announcement_channels(interaction.guild, interaction.user.id)
     if not channels:
-        await ctx.send(
-            "Chưa có kênh thông báo nào được đăng ký cho server này.\n"
-            "Dùng `/them-kenh-thong-bao` ngay trong kênh cần thêm (hoặc chỉ định `#kênh`).\n"
-            "Hiện tại `/tom-tat-thong-bao` đang tạm suy đoán theo tên kênh chứa \"thông-báo\"/\"announce\"."
+        await interaction.response.send_message(
+            "Bạn chưa có kênh thông báo nào được đăng ký (và server này không có kênh nào tên chứa \"thông-báo\" để tự động thêm).\n"
+            "Dùng `/them-kenh-thong-bao` ngay trong kênh cần thêm (hoặc chỉ định kênh khác).",
+            ephemeral=True
         )
         return
     mentions = "\n".join(f"- {ch.mention}" for ch in channels)
-    await ctx.send(f"📋 Kênh thông báo đã đăng ký:\n{mentions}")
+    await interaction.response.send_message(f"📋 Kênh thông báo bạn đã đăng ký:\n{mentions}", ephemeral=True)
 
-@bot.command(name='tom-tat-thong-bao', description='Tóm tắt các thông báo của ngày')
-async def tom_tat_thong_bao(ctx):
-    """Tóm tắt thông báo"""
-    await ctx.defer()
-    
+
+@bot.tree.command(name='tom-tat-thong-bao', description='Tóm tắt các thông báo của ngày')
+async def tom_tat_thong_bao(interaction: discord.Interaction):
+    """Tóm tắt thông báo — chỉ người gọi lệnh thấy được kết quả"""
+    await interaction.response.defer(ephemeral=True)
+
     try:
-        # Gửi thông báo đang xử lý
         processing_embed = discord.Embed(
             title="🔄 Đang tóm tắt thông báo",
             description="Đang kết nối các kênh thông báo...",
             color=discord.Color.yellow()
         )
-        processing_msg = await ctx.send(embed=processing_embed)
-        
-        # Lấy thông báo
-        announcements = await tom_tat.get_channel_announcements(ctx.guild, hours=24)
-        
-        if not announcements:
-            await ctx.send("Không tìm thấy thông báo nào trong 24 giờ qua.")
-            return
-        
-        # Định dạng tin nhắn để gửi tới AI
-        messages_text = "\n".join([
-            f"[{a['time']}] {a['channel']}: {a['author']}\n{a['content']}"
-            for a in announcements
-        ])
-        
-        # Cập nhật: đang lọc
-        processing_embed.description = "Đang lọc và phân loại thông báo..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Tóm tắt
-        summary = await tom_tat.summarize_with_ai(messages_text, mode="notice")
-        
-        # Cập nhật: đang tạo báo cáo
-        processing_embed.description = "Đang tạo báo cáo..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Xóa tin nhắn đang xử lý
-        await processing_msg.delete()
-        
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
-        sources = tom_tat.format_sources_field(announcements)
-        summary_embeds = tom_tat.build_summary_embeds(
-            summary,
-            f"📋 Thông báo hôm nay - {datetime.now().strftime('%a, %d/%m')}",
-            source_fields=[("📨 Tin nhắn nguồn", sources)]
-        )
-        for summary_embed in summary_embeds:
-            await ctx.send(embed=summary_embed)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Lỗi: {str(e)}")
+        await interaction.edit_original_response(embed=processing_embed)
 
-@bot.command(name='tom-tat-tro-chuyen', description='Tóm tắt trò chuyện của một kênh')
-async def tom_tat_tro_chuyen(ctx, kênh: discord.TextChannel = None):
-    """Tóm tắt trò chuyện trong kênh"""
-    if kênh is None:
-        kênh = ctx.channel
-    
-    await ctx.defer()
-    
+        # Lấy thông báo theo danh sách kênh RIÊNG của người gọi lệnh
+        tom_tat.ensure_user_seeded(interaction.guild, interaction.user.id)
+        announcements = await tom_tat.get_channel_announcements(interaction.guild, interaction.user.id, hours=24)
+
+        if not announcements:
+            await interaction.edit_original_response(embed=None, content="Không tìm thấy thông báo nào trong 24 giờ qua.")
+            return
+
+        # Đánh số từng tin để AI trích dẫn lại, sau đó thay số bằng link nhảy tới tin gốc
+        messages_text, index_to_url, _ = tom_tat.format_indexed_messages(announcements, include_channel=True)
+
+        processing_embed.description = "Đang lọc và phân loại thông báo..."
+        await interaction.edit_original_response(embed=processing_embed)
+
+        summary = await tom_tat.summarize_with_ai(messages_text, mode="notice")
+        summary = tom_tat.linkify_citations(summary, index_to_url)
+
+        processing_embed.description = "Đang tạo báo cáo..."
+        await interaction.edit_original_response(embed=processing_embed)
+
+        # Gửi kết quả — mỗi điểm trong tóm tắt đã tự có link [nguồn] nhảy tới tin gốc,
+        # không cần liệt kê riêng toàn bộ tin nhắn nguồn ở đầu nữa
+        title = f"📋 Thông báo hôm nay - {datetime.now().strftime('%a, %d/%m')}"
+        await send_report(interaction, [], summary, title)
+
+    except Exception as e:
+        await safe_error_reply(interaction, e)
+
+
+@bot.tree.command(name='tom-tat-tro-chuyen', description='Tóm tắt trò chuyện của một kênh')
+@app_commands.describe(kenh='Kênh cần tóm tắt (bỏ trống = kênh hiện tại)')
+async def tom_tat_tro_chuyen(interaction: discord.Interaction, kenh: discord.TextChannel = None):
+    """Tóm tắt trò chuyện trong kênh — chỉ người gọi lệnh thấy được kết quả"""
+    if kenh is None:
+        kenh = interaction.channel
+
+    await interaction.response.defer(ephemeral=True)
+
     try:
         # Kiểm tra quyền
-        if not kênh.permissions_for(ctx.me).read_messages:
-            await ctx.send(f"Bot không có quyền đọc kênh {kênh.mention}")
+        if not kenh.permissions_for(interaction.guild.me).read_messages:
+            await interaction.edit_original_response(embed=None, content=f"Bot không có quyền đọc kênh {kenh.mention}")
             return
-        
-        # Gửi thông báo đang xử lý
+
         processing_embed = discord.Embed(
-            title=f"🔄 Đang tóm tắt #{kênh.name}",
-            description=f"Đang đọc 4 giờ tin nhắn gần nhất...",
+            title=f"🔄 Đang tóm tắt #{kenh.name}",
+            description="Đang đọc 4 giờ tin nhắn gần nhất...",
             color=discord.Color.yellow()
         )
-        processing_msg = await ctx.send(embed=processing_embed)
-        
+        await interaction.edit_original_response(embed=processing_embed)
+
         # Lấy tin nhắn
-        messages = await tom_tat.get_recent_messages(kênh, hours=4)
-        
+        messages = await tom_tat.get_recent_messages(kenh, hours=4)
+
         if not messages:
-            await ctx.send(f"Không tìm thấy tin nhắn nào trong #{kênh.name} trong 4 giờ qua.")
+            await interaction.edit_original_response(embed=None, content=f"Không tìm thấy tin nhắn nào trong #{kenh.name} trong 4 giờ qua.")
             return
-        
-        # Định dạng tin nhắn
-        messages_text = "\n".join([
-            f"[{m['time']}] {m['author']}: {m['content']}"
-            for m in messages
-        ])
-        
-        # Cập nhật: đang nhóm chủ đề
+
+        # Đánh số từng tin để AI trích dẫn lại, sau đó thay số bằng link nhảy tới tin gốc
+        messages_text, index_to_url, _ = tom_tat.format_indexed_messages(messages, include_channel=False)
+
         processing_embed.description = "Đang nhóm theo chủ đề..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Tóm tắt
+        await interaction.edit_original_response(embed=processing_embed)
+
         summary = await tom_tat.summarize_with_ai(messages_text, mode="chat")
-        
-        # Cập nhật: đang tạo báo cáo
+        summary = tom_tat.linkify_citations(summary, index_to_url)
+
         processing_embed.description = "Đang tạo báo cáo..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Xóa tin nhắn đang xử lý
-        await processing_msg.delete()
-        
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
-        sources = tom_tat.format_sources_field(messages)
-        summary_embeds = tom_tat.build_summary_embeds(
-            summary,
-            f"💬 Trò chuyện #{kênh.name} - 4 giờ gần nhất",
-            source_fields=[("📨 Tin nhắn nguồn", sources)]
-        )
-        for summary_embed in summary_embeds:
-            await ctx.send(embed=summary_embed)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Lỗi: {str(e)}")
+        await interaction.edit_original_response(embed=processing_embed)
 
-@bot.command(name='tom-tat-chung', description='Tóm tắt toàn bộ (thông báo + trò chuyện)')
-async def tom_tat_chung(ctx):
-    """Tóm tắt toàn bộ server"""
-    await ctx.defer()
-    
-    try:
-        # Gửi thông báo đang xử lý
-        processing_embed = discord.Embed(
-            title="🔄 Đang tóm tắt toàn bộ",
-            description="Đang kết nối thông báo + kênh trò chuyện...",
-            color=discord.Color.yellow()
-        )
-        processing_msg = await ctx.send(embed=processing_embed)
-        
-        # Lấy thông báo
-        announcements = await tom_tat.get_channel_announcements(ctx.guild, hours=24)
-        
-        # Lấy tin nhắn từ kênh chung (nếu có)
-        general_channel = None
-        for channel in ctx.guild.text_channels:
-            if 'chung' in channel.name.lower() or 'general' in channel.name.lower():
-                general_channel = channel
-                break
-        
-        messages = []
-        if general_channel:
-            messages = await tom_tat.get_recent_messages(general_channel, hours=4)
-        
-        # Cập nhật: đang lọc
-        processing_embed.description = "Đang lọc và phân loại dữ liệu..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Định dạng dữ liệu
-        combined_text = "=== THÔNG BÁO ===\n"
-        combined_text += "\n".join([
-            f"[{a['time']}] {a['channel']}: {a['author']}\n{a['content']}"
-            for a in announcements
-        ])
-        
-        if messages:
-            combined_text += "\n\n=== TRÌNH CHUYỆN ===\n"
-            combined_text += "\n".join([
-                f"[{m['time']}] {m['author']}: {m['content']}"
-                for m in messages
-            ])
-        
-        # Tóm tắt
-        summary = await tom_tat.summarize_with_ai(combined_text, mode="all")
-        
-        # Cập nhật: đang tạo báo cáo
-        processing_embed.description = "Đang gộp thành bản tin..."
-        await processing_msg.edit(embed=processing_embed)
-        
-        # Xóa tin nhắn đang xử lý
-        await processing_msg.delete()
-        
-        # Gửi kết quả (kèm tin nhắn nguồn để đối chiếu). Tách nhiều embed nếu dài, không cắt bớt nội dung
-        summary_embeds = tom_tat.build_summary_embeds(
-            summary,
-            f"📰 Bản tin chung - {datetime.now().strftime('%a, %d/%m')}",
-            source_fields=[
-                ("📢 Nguồn thông báo", tom_tat.format_sources_field(announcements, max_items=6, max_chars=500)),
-                ("💬 Nguồn trò chuyện", tom_tat.format_sources_field(messages, max_items=6, max_chars=500)),
-            ]
-        )
-        for summary_embed in summary_embeds:
-            await ctx.send(embed=summary_embed)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Lỗi: {str(e)}")
+        # Gửi kết quả: tin nhắn nguồn trước, tóm tắt sau — mỗi điểm trong tóm tắt đã tự có link [nguồn]
+        sources = tom_tat.format_sources_field(messages, max_items=20, max_chars=3800)
+        title = f"💬 Trò chuyện #{kenh.name} - 4 giờ gần nhất"
+        await send_report(interaction, [("Tin nhắn nguồn", sources)], summary, title)
 
-@bot.event
-async def on_command_error(ctx, error):
-    """Xử lý lỗi command"""
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.send("❌ Command không tồn tại. Dùng `/tom-tat-*` để bắt đầu.")
-    else:
-        await ctx.send(f"❌ Lỗi: {str(error)}")
+    except Exception as e:
+        await safe_error_reply(interaction, e)
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Xử lý lỗi slash command"""
+    await safe_error_reply(interaction, error)
+
 
 def run_bot(token):
     """Chạy bot với token"""

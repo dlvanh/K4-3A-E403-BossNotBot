@@ -4,14 +4,17 @@ Bot **Tom Tat** giúp bạn tóm tắt các thông báo và trò chuyện trên 
 
 ## ✨ Tính năng
 
-- `/tom-tat-thong-bao` - Tóm tắt các thông báo trong 24h
-- `/tom-tat-tro-chuyen [kênh]` - Tóm tắt trò chuyện trong 4h gần nhất
-- `/tom-tat-chung` - Tóm tắt toàn bộ (thông báo + trò chuyện)
-- `/tom-tat-them-kenh-thong-bao [kênh]` - Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo, bot nhớ đến khi bỏ đăng ký
-- `/tom-tat-xoa-kenh-thong-bao [kênh]` - Bỏ đăng ký kênh khỏi nguồn thông báo
-- `/tom-tat-ds-kenh-thong-bao` - Xem danh sách kênh thông báo đã đăng ký
+Bot dùng **slash command thật của Discord** — gõ `/` trong kênh là thấy menu gợi ý đầy đủ. Kết quả tóm tắt chỉ hiện cho người gọi lệnh thấy (ephemeral), không làm phiền kênh chung.
 
-Mỗi bản tóm tắt đều kèm danh sách tin nhắn nguồn (có link nhảy tới tin gốc) để đối chiếu.
+- `/tom-tat-thong-bao` - Tóm tắt các thông báo trong 24h, từ các kênh đã đăng ký
+- `/tom-tat-tro-chuyen [kenh]` - Tóm tắt trò chuyện trong 4h gần nhất
+- `/them-kenh-thong-bao [kenh]` - Đăng ký kênh này (hoặc kênh chỉ định) làm nguồn thông báo, bot nhớ đến khi bỏ đăng ký
+- `/xoa-kenh-thong-bao [kenh]` - Bỏ đăng ký kênh khỏi nguồn thông báo
+- `/ds-kenh-thong-bao` - Xem danh sách kênh thông báo đã đăng ký
+
+Khi bot khởi động lần đầu trong 1 server, nó tự động quét và đăng ký sẵn các kênh có tên chứa "thông-báo"/"announce" (chỉ làm 1 lần — sau đó gỡ kênh nào bằng `/xoa-kenh-thong-bao` thì kênh đó không tự quay lại nữa).
+
+Mỗi điểm trong bản tóm tắt đều có link **[nguồn]** nhảy thẳng tới đúng tin nhắn gốc trên Discord, cộng thêm 1 embed liệt kê đầy đủ tin nhắn nguồn hiện ra đầu tiên để đối chiếu.
 
 ---
 
@@ -123,37 +126,25 @@ python3 tom_tat_bot.py
 
 Sau khi bot online, sử dụng các command trong Discord:
 
-### 0️⃣ Đăng ký kênh thông báo (làm 1 lần)
+### 0️⃣ Quản lý kênh thông báo
 ```
-/tom-tat-them-kenh-thong-bao
+/them-kenh-thong-bao
+/xoa-kenh-thong-bao
+/ds-kenh-thong-bao
 ```
-→ Đăng ký kênh hiện tại làm nguồn cho `/tom-tat-thong-bao`, bot nhớ vĩnh viễn (kể cả restart) đến khi bạn bỏ đăng ký bằng `/tom-tat-xoa-kenh-thong-bao`. Có thể đăng ký nhiều kênh. Nếu chưa đăng ký kênh nào, bot sẽ tạm suy đoán theo tên kênh có chứa "thông-báo".
+Bot tự động đăng ký sẵn các kênh có tên chứa "thông-báo" khi mới khởi động trong 1 server (chỉ 1 lần). Muốn thêm/bớt thủ công thì dùng 2 lệnh trên — bot nhớ vĩnh viễn (kể cả restart) đến khi bạn đổi lại. Dùng `/ds-kenh-thong-bao` để xem hiện đang đăng ký kênh nào.
 
 ### 1️⃣ Tóm tắt Thông báo
 ```
 /tom-tat-thong-bao
 ```
-→ Tóm tắt tất cả thông báo trong 24h từ các kênh đã đăng ký ở trên
+→ Tóm tắt tất cả thông báo trong 24h từ các kênh đã đăng ký ở trên. Chỉ bạn (người gõ lệnh) thấy được kết quả.
 
 ### 2️⃣ Tóm tắt Trò Chuyện
 ```
-/tom-tat-tro-chuyen #tên-kênh
+/tom-tat-tro-chuyen kenh:#tên-kênh
 ```
-→ Tóm tắt 4h tin nhắn gần nhất từ kênh đó
-
-**Ví dụ:**
-```
-/tom-tat-tro-chuyen #chung
-/tom-tat-tro-chuyen #hỏi-đáp
-```
-
-Nếu không chỉ định kênh, sẽ tóm tắt kênh hiện tại.
-
-### 3️⃣ Tóm tắt Toàn Bộ
-```
-/tom-tat-chung
-```
-→ Tóm tắt cả thông báo + kênh chung
+→ Tóm tắt 4h tin nhắn gần nhất từ kênh đó. Không chỉ định `kenh` thì tóm tắt kênh hiện tại.
 
 ---
 
@@ -168,8 +159,9 @@ Nếu không chỉ định kênh, sẽ tóm tắt kênh hiện tại.
 - Kiểm tra bot có quyền trong kênh đó không
 
 ### ❌ "Không tìm thấy tin nhắn nào"
-- Thử vào kênh #chung, nó có tin nhắn trong 4h không?
-- Các kênh thông báo có chứa từ "thông-báo" trong tên không?
+- Thử vào kênh có tin nhắn trong 4h gần đây không?
+- Kênh thông báo đã được `/them-kenh-thong-bao` hoặc tự động quét chưa? Kiểm tra bằng `/ds-kenh-thong-bao`
+- Xem log `[debug]` trong terminal chạy bot — có ghi rõ quét được bao nhiêu tin thô, giữ lại bao nhiêu tin sau lọc
 
 ### ❌ "API Error: Lỗi từ OpenAI"
 - Kiểm tra OPENAI_API_KEY có đúng không
@@ -184,7 +176,7 @@ tom-tat-bot/
 ├── tom_tat_bot.py                  # File chính của bot
 ├── replay_test.py                  # Test tóm tắt AI ngoại tuyến bằng dữ liệu k4_messages.csv (không cần Discord)
 ├── seed_lib.py                     # Hàm dùng chung để bơm tin nhắn mẫu qua Webhook
-├── seed_test_channel.py            # Seed 1 kênh chat mẫu (để test /tom-tat-tro-chuyen, /tom-tat-chung)
+├── seed_test_channel.py            # Seed 1 kênh chat mẫu (để test /tom-tat-tro-chuyen)
 ├── seed_thong_bao_chung.py         # Seed kênh thông báo chung mẫu
 ├── seed_thong_bao_lop_hoc.py       # Seed kênh thông báo lớp học mẫu
 ├── seed_thong_bao_build.py         # Seed kênh thông báo Build Phase mẫu
@@ -219,7 +211,7 @@ tom-tat-bot/
 
 ## 💡 Mẹo
 
-- Dùng `/tom-tat-them-kenh-thong-bao` để đăng ký kênh thông báo thay vì trông chờ bot đoán theo tên (tên kênh không dấu sẽ không khớp "thông-báo")
+- Dùng `/them-kenh-thong-bao` nếu bot chưa tự nhận diện đúng kênh thông báo (tên kênh không dấu như "thong-bao" vẫn khớp, nhưng tên khác hẳn thì phải đăng ký tay)
 - Dùng command trong các kênh có nhiều tin nhắn để kết quả tốt hơn
 - AI sẽ nhóm theo chủ đề và highlight những vấn đề chưa giải quyết
 - Mỗi bản tóm tắt có kèm link tin nhắn nguồn — dùng để đối chiếu AI tóm đúng chưa
