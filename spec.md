@@ -8,9 +8,37 @@ Loại: [ ] Tối ưu tính năng có sẵn  [x] Tính năng mới
 - **Job executor + workflow (đính kèm worksheet JTBD / ảnh sơ đồ)**: ![WorksheetJTBD](images/WorksheetJTBD.png)
 - **Core JTBD (không tên sản phẩm/AI trong câu)**: "Khi quay lại Discord, tôi muốn nắm nhanh mọi thông báo quan trọng để không bỏ sót thông tin nào."
 - **Problem statement (KHÔNG chữ AI)**: Học viên phải tự lướt qua hàng trăm tin nhắn ở nhiều kênh khác nhau để tìm thông báo và các câu trả lời quan trọng. Điều này dễ bỏ sót các deadline, hoặc phải hỏi lại các câu hỏi quan trọng để biết câu trả lời.
-- Evidence (chuẩn A và/hoặc B — log đầy đủ trong repo):
-  - Số liệu mining / kết quả khảo sát (n = ?, % xác nhận):
-  - ≥5 quote/ví dụ nguyên văn + nguồn:
+
+**Chuẩn B — mining từ `data/discord-pack/k4_messages.csv` (1.092 tin, 12-14/9/2026, 2 server K4):**
+
+Phương pháp đếm (kiểm lại được): đọc toàn bộ 779 tin nhắn của người (loại tin bot), phân loại
+"câu hỏi hành chính" = tin có dấu `?` hoặc cụm hỏi ("cho hỏi", "là gì", "thế nào"...) **và** chứa
+từ khoá hành chính (hạn/deadline/nộp/lịch/điểm danh/standup/đề tài/team/lab/xp/onboard). Script
+đếm lưu trong lịch sử làm việc của phiên (có thể chạy lại trên `k4_messages.csv`).
+
+| Số liệu | Giá trị |
+|---|---|
+| Tổng tin nhắn 3 ngày, 2 server | 1.092 (779 người · 313 bot) |
+| Kênh đông nhất | `K4-L3-4/channel_10`: 654 tin / 3 ngày (~218 tin/ngày) |
+| Câu hỏi hành chính/deadline trong tin người | 92/779 (11,8%) |
+| Lượt tag trực tiếp bot để hỏi (`[@BOT]`) | 104 lượt — cho thấy nhu cầu tìm thông tin chủ động thật, không phải suy diễn |
+| Câu hỏi lặp lại **cùng một chủ đề** trong 1 buổi sáng (vd "hạn nộp daily standup") | ≥4 tin hỏi riêng lẻ dù đã có câu trả lời trước đó (M13908, M07653, M45837, M82163 — 09:05→19:35 ngày 14/9) |
+
+**≥5 quote/ví dụ nguyên văn (msg_id, ≤2 câu/ví dụ theo luật data pack):**
+
+1. `M44562` (12/9, channel_10): "[@BOT] cách để xem xem mình có bị miss buổi nào không" — học viên
+   chủ động hỏi bot vì không tự tra được thông tin điểm danh giữa dòng chat.
+2. `M76564`/`M15491` (13/9, channel_10, cách nhau 1 phút): cùng một học viên gửi **gần như y hệt**
+   một câu hỏi 2 lần liên tiếp (bot đang cooldown chưa trả lời kịp lần đầu) — bằng chứng trực tiếp
+   của việc thông tin/câu hỏi bị trôi trong luồng chat bận.
+3. `M07653`/`M13908`/`M45837` (14/9, channel_10): 3 học viên khác nhau hỏi riêng lẻ cùng một câu
+   "hạn nộp daily standup" trong cùng buổi sáng — câu trả lời tồn tại nhưng bị trôi, không ai tìm
+   lại được.
+4. `M26845` (14/9, channel_10): "[@BOT] để không bị miss thông báo nhưng cũng không bị spam thông
+   báo, cài đặt chế độ chỉ mentions là được đúng ko?" — học viên tự tìm cách đối phó với quá tải
+   tin nhắn.
+5. `M33002` (13/9, channel_02): "Hạn tìm đồng đội đến bao giờ thế mọi người ơi!!!" — câu hỏi quan
+   trọng bị lảng tránh, chỉ được trỏ sang kênh khác, không có câu trả lời rõ ràng.
 
 ## §2. Impact & quyết định chọn
 
