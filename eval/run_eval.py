@@ -3,7 +3,6 @@ run_eval.py — Chạy golden set qua TomTatBot.summarize_with_ai() và chấm t
 
 Cách dùng (chạy từ thư mục gốc repo):
     codebase/.venv/Scripts/python eval/run_eval.py               # lượt thật, theo LLM_PROVIDER + key trong codebase/.env
-    codebase/.venv/Scripts/python eval/run_eval.py --provider nvidia   # ghi đè provider để so sánh model
     codebase/.venv/Scripts/python eval/run_eval.py --only K3a    # chạy 1 case
     codebase/.venv/Scripts/python eval/run_eval.py --dry-run     # không gọi AI, chỉ kiểm tra script + bộ chấm
 
@@ -386,7 +385,7 @@ def main():
     ap.add_argument("--only", help="danh sách id, cách nhau bởi dấu phẩy, ví dụ K3a,K3b")
     ap.add_argument("--delay", type=float, default=4.0, help="giây nghỉ giữa các case (tránh rate limit)")
     ap.add_argument("--retries", type=int, default=3, help="số lần thử lại khi bị rate limit (chờ tăng dần)")
-    ap.add_argument("--provider", help="ghi đè LLM_PROVIDER trong .env, vd nvidia — để so sánh model")
+    ap.add_argument("--provider", help="ghi đè LLM_PROVIDER trong .env")
     ap.add_argument("--dry-run", action="store_true", help="không gọi AI; dùng FakeProvider để thử bộ chấm")
     ap.add_argument("--regrade", metavar="RUN_DIR", help="chấm lại trace.jsonl của một lượt cũ, không gọi AI")
     args = ap.parse_args()
